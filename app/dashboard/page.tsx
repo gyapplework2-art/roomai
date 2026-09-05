@@ -73,7 +73,7 @@ export default async function DashboardPage() {
             <Link href="/dashboard" className="font-medium text-slate-950">
               My Designs
             </Link>
-            <Link href="/dashboard/new" className="transition-colors hover:text-slate-950">
+            <Link href="/projects/new" className="transition-colors hover:text-slate-950">
               New Design
             </Link>
             <Link href="/dashboard/account" className="transition-colors hover:text-slate-950">
@@ -95,7 +95,7 @@ export default async function DashboardPage() {
             </h1>
           </div>
           <Button asChild size="lg" className="w-full sm:w-auto">
-            <Link href="/dashboard/new">
+            <Link href="/projects/new">
               <Plus />
               New Design
             </Link>
@@ -114,7 +114,7 @@ export default async function DashboardPage() {
               Start with a room, then shape the space around the way you live.
             </p>
             <Button asChild className="mt-8">
-              <Link href="/dashboard/new">Create Your First Design</Link>
+              <Link href="/projects/new">Create Your First Design</Link>
             </Button>
           </section>
         ) : (
