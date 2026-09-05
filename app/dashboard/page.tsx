@@ -22,11 +22,17 @@ function formatStatus(status: string) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+function formatDimension(value: number) {
+  return Number(value.toFixed(1)).toString();
+}
+
 function formatDimensions(project: Project) {
-  const baseDimensions = `${project.width_cm} x ${project.length_cm} cm`;
-  return project.height_cm
-    ? `${baseDimensions} x ${project.height_cm} cm`
-    : baseDimensions;
+  const dimensions = [project.width_cm, project.length_cm, project.height_cm]
+    .filter((value): value is number => value !== null)
+    .map(formatDimension)
+    .join(" × ");
+
+  return `${dimensions} cm`;
 }
 
 function formatDate(date: string) {
@@ -154,7 +160,7 @@ export default async function DashboardPage() {
                   </dl>
                 </div>
                 <Button asChild variant="link" className="mt-8 w-fit px-0">
-                  <Link href={`/dashboard/designs/${project.id}`}>
+                  <Link href={`/projects/${project.id}`}>
                     Open Design
                     <ArrowUpRight />
                   </Link>

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { createProject } from "@/lib/projects/actions";
 import {
   COLOR_MOODS,
   FURNITURE,
@@ -90,6 +91,7 @@ export function ProjectWizard() {
   const [data, setData] = useState<WizardData>(initialWizardData);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saveMessage, setSaveMessage] = useState("");
+  const [isPending, startTransition] = useTransition();
 
   function updateSection<K extends keyof WizardData>(section: K, value: WizardData[K]) {
     setData((current) => ({ ...current, [section]: value }));
@@ -148,6 +150,29 @@ export function ProjectWizard() {
 
   function updateBudget(key: keyof WizardData["budget"], value: string) {
     updateSection("budget", { ...data.budget, [key]: value });
+  }
+
+  function handleCreateProject() {
+    const nextErrors = validateStep(1, data);
+    const styleErrors = validateStep(3, data);
+    const budgetErrors = validateStep(6, data);
+    const allErrors = { ...nextErrors, ...styleErrors, ...budgetErrors };
+
+    if (Object.keys(allErrors).length) {
+      setErrors(allErrors);
+      setSaveMessage("Please review the highlighted details before creating your project.");
+      return;
+    }
+
+    setErrors({});
+    setSaveMessage("");
+    startTransition(() => {
+      void createProject(data).then((result) => {
+        if (result.error) {
+          setSaveMessage(result.error);
+        }
+      });
+    });
   }
 
   return (
@@ -269,7 +294,7 @@ export function ProjectWizard() {
 
         <div className="mt-10 flex flex-col-reverse gap-3 border-t border-slate-200 pt-6 sm:flex-row sm:justify-between">
           <Button type="button" variant="ghost" onClick={goBack} disabled={step === 1}><ArrowLeft />Back</Button>
-          {step < 7 ? <Button type="button" onClick={goNext}>Continue<ArrowRight /></Button> : <Button type="button" onClick={() => setSaveMessage("Project saving will be connected in the next development step.")}>Create Project<Check /></Button>}
+          {step < 7 ? <Button type="button" onClick={goNext}>Continue<ArrowRight /></Button> : <Button type="button" onClick={handleCreateProject} disabled={isPending}>{isPending ? "Creating Project..." : "Create Project"}<Check /></Button>}
         </div>
       </section>
     </div>
