@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ROOM_TYPES } from "@/lib/projects/validation";
 
 const nonEmptyText = (max: number) => z.string().trim().min(1).max(max);
-const optionalText = (max: number) => z.string().trim().max(max).optional();
+const nullableText = (max: number) => z.string().trim().max(max).nullable();
 
 const finiteNumber = z.number().refine(Number.isFinite, "Must be a finite number.");
 const positiveNumber = finiteNumber.refine((value) => value > 0, "Must be greater than 0.");
@@ -27,7 +27,7 @@ export const dimensionsSchema = z.object({
 export const roomSchema = z.object({
   widthCm: positiveNumber,
   lengthCm: positiveNumber,
-  heightCm: positiveNumber.optional(),
+  heightCm: positiveNumber.nullable(),
   roomType: z.enum(ROOM_TYPES),
 });
 
@@ -71,11 +71,11 @@ export const decorationObjectSchema = z.object({
   category: nonEmptyText(120),
   name: nonEmptyText(160),
   description: nonEmptyText(500),
-  material: optionalText(120),
-  color: optionalText(120),
-  position: positionSchema.optional(),
-  estimatedPrice: nonNegativeNumber.optional(),
-  reasoning: optionalText(1000),
+  material: nullableText(120),
+  color: nullableText(120),
+  position: positionSchema.nullable(),
+  estimatedPrice: nonNegativeNumber.nullable(),
+  reasoning: nullableText(1000),
 });
 
 export const budgetSchema = z

@@ -122,7 +122,7 @@ export default async function ProjectPage({
             </div>
             <p className="mt-3 text-sm text-slate-500">{formatValue(project.room_type)}</p>
           </div>
-          <GenerateAiButton />
+          <GenerateAiButton projectId={project.id} />
         </div>
 
         <div className="mt-8 border border-slate-200 bg-white p-6 shadow-[0_12px_30px_rgba(15,23,42,0.04)] sm:p-10">
