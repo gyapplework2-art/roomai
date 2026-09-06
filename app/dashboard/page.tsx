@@ -160,10 +160,10 @@ export default async function DashboardPage() {
                   </dl>
                 </div>
                 <Button asChild variant="link" className="mt-8 w-fit px-0">
-                  <Link href={`/projects/${project.id}`}>
-                    Open Design
+                  <a href={`/projects/${project.id}`}>
+                    Open Project
                     <ArrowUpRight />
-                  </Link>
+                  </a>
                 </Button>
               </article>
             ))}

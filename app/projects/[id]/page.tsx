@@ -91,8 +91,13 @@ export default async function ProjectPage({
       .eq("project_id", id)
       .maybeSingle(),
   ]);
+  const geometryResult = await supabase
+    .from("room_geometries")
+    .select("id")
+    .eq("project_id", id)
+    .maybeSingle();
 
-  if (projectResult.error || !projectResult.data || preferencesResult.error) {
+  if (projectResult.error || !projectResult.data || preferencesResult.error || geometryResult.error) {
     notFound();
   }
 
@@ -107,7 +112,7 @@ export default async function ProjectPage({
           <Link href="/dashboard" className="text-xl font-semibold tracking-tight">RoomAI</Link>
           <div className="flex items-center gap-5 text-sm">
             <Link href="/projects/new" className="text-slate-600 transition-colors hover:text-slate-950">New Design</Link>
-            <Link href="/dashboard" className="text-slate-600 transition-colors hover:text-slate-950">Back to Dashboard</Link>
+            <a href="/dashboard" className="text-slate-600 transition-colors hover:text-slate-950">Back to Dashboard</a>
           </div>
         </div>
       </header>
@@ -122,7 +127,12 @@ export default async function ProjectPage({
             </div>
             <p className="mt-3 text-sm text-slate-500">{formatValue(project.room_type)}</p>
           </div>
-          <GenerateAiButton projectId={project.id} />
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <Link href={`/projects/${project.id}/room`} className="border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-slate-950 hover:text-slate-950">
+              {geometryResult.data ? "Edit Room Shape" : "Set Up Room Shape"}
+            </Link>
+            <GenerateAiButton projectId={project.id} />
+          </div>
         </div>
 
         <div className="mt-8 border border-slate-200 bg-white p-6 shadow-[0_12px_30px_rgba(15,23,42,0.04)] sm:p-10">

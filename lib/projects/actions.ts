@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
+import { roomGeometrySchema } from "@/lib/geometry/schema";
+import { saveRoomGeometry } from "@/lib/geometry/actions";
 import { createClient } from "@/lib/supabase/server";
 import {
   COLOR_MOODS,
@@ -91,6 +93,7 @@ const wizardPayloadSchema = z
         "Unsupported priority.",
       ),
     }),
+    geometry: roomGeometrySchema.nullable(),
   })
   .superRefine((payload, context) => {
     if (payload.style.secondaryStyle === payload.style.primaryStyle) {
@@ -210,6 +213,17 @@ export async function createProject(payload: unknown): Promise<CreateProjectResu
   if (preferencesError) {
     await supabase.from("projects").delete().eq("id", project.id).eq("user_id", userId);
     return { error: "We could not finish creating your project. Please try again." };
+  }
+
+  if (!parsed.data.geometry) {
+    await supabase.from("projects").delete().eq("id", project.id).eq("user_id", userId);
+    return { error: "Choose a room shape before creating your project." };
+  }
+
+  const geometryResult = await saveRoomGeometry(project.id, parsed.data.geometry);
+  if (!geometryResult.success) {
+    await supabase.from("projects").delete().eq("id", project.id).eq("user_id", userId);
+    return { error: "We could not save your room shape. Please try again." };
   }
 
   redirect(`/projects/${project.id}`);

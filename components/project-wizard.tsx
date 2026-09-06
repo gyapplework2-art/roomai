@@ -8,6 +8,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createProject } from "@/lib/projects/actions";
+import { RoomShapeSelector } from "@/components/room-geometry/room-shape-selector";
+import type { RoomGeometry } from "@/lib/geometry/types";
 import {
   COLOR_MOODS,
   FURNITURE,
@@ -26,6 +28,7 @@ import {
 
 const steps = [
   "Room",
+  "Room Shape",
   "Function",
   "Style & Colors",
   "Materials",
@@ -89,6 +92,7 @@ function SummaryList({ title, items }: { title: string; items: string[] }) {
 export function ProjectWizard() {
   const [step, setStep] = useState<WizardStep>(1);
   const [data, setData] = useState<WizardData>(initialWizardData);
+  const [geometry, setGeometry] = useState<RoomGeometry | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saveMessage, setSaveMessage] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -127,7 +131,11 @@ export function ProjectWizard() {
       return;
     }
     setErrors({});
-    setStep((current) => (current < 7 ? (current + 1) as WizardStep : current));
+    if (step === 1 && !geometry) {
+      setErrors({ geometry: "Choose a room shape to continue." });
+      return;
+    }
+    setStep((current) => (current < 8 ? (current + 1) as WizardStep : current));
   }
 
   function goBack() {
@@ -138,6 +146,9 @@ export function ProjectWizard() {
 
   function updateRoom(key: keyof WizardData["room"], value: string) {
     updateSection("room", { ...data.room, [key]: value });
+    if (key === "width" || key === "length" || key === "height") {
+      setGeometry(null);
+    }
   }
 
   function updateFunction(key: keyof WizardData["function"], value: string) {
@@ -167,7 +178,7 @@ export function ProjectWizard() {
     setErrors({});
     setSaveMessage("");
     startTransition(() => {
-      void createProject(data).then((result) => {
+      void createProject({ ...data, geometry }).then((result) => {
         if (result.error) {
           setSaveMessage(result.error);
         }
@@ -191,7 +202,7 @@ export function ProjectWizard() {
                   </span>
                   <span className="hidden sm:inline">{label}</span>
                 </button>
-                {stepNumber < 7 && <span className={`mx-3 h-px flex-1 ${complete ? "bg-slate-600" : "bg-slate-200"}`} />}
+                {stepNumber < 8 && <span className={`mx-3 h-px flex-1 ${complete ? "bg-slate-600" : "bg-slate-200"}`} />}
               </li>
             );
           })}
@@ -201,7 +212,7 @@ export function ProjectWizard() {
       <section className="border border-slate-200 bg-white p-6 shadow-[0_12px_30px_rgba(15,23,42,0.04)] sm:p-10">
         {step === 1 && (
           <>
-            <SectionHeading eyebrow="Step 1 of 7" title="Tell us about the room" description="Start with the basics. You can refine the details as your design takes shape." />
+            <SectionHeading eyebrow="Step 1 of 8" title="Tell us about the room" description="Start with the basics. You can refine the details as your design takes shape." />
             <div className="grid gap-6 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <Label htmlFor="project-name">Project name</Label>
@@ -239,7 +250,20 @@ export function ProjectWizard() {
 
         {step === 2 && (
           <>
-            <SectionHeading eyebrow="Step 2 of 7" title="How will you use the room?" description="Choose every function that should be supported by the final design." />
+            <SectionHeading eyebrow="Step 2 of 8" title="Choose the room shape" description="Start with a recognizable footprint. You can refine wall dimensions later." />
+            <RoomShapeSelector
+              widthCm={Number(data.room.width) * (data.room.units === "metric" ? 100 : 30.48)}
+              lengthCm={Number(data.room.length) * (data.room.units === "metric" ? 100 : 30.48)}
+              ceilingHeightCm={data.room.height ? Number(data.room.height) * (data.room.units === "metric" ? 100 : 30.48) : null}
+              onChange={setGeometry}
+            />
+            <FieldError message={errors.geometry} />
+          </>
+        )}
+
+        {step === 3 && (
+          <>
+            <SectionHeading eyebrow="Step 3 of 8" title="How will you use the room?" description="Choose every function that should be supported by the final design." />
             <div className="space-y-8">
               <div><Label className="mb-3 block">Room functions</Label><ChoiceList values={ROOM_FUNCTIONS} selected={data.function.roomFunctions} onChange={(value, checked) => changeList("function", "roomFunctions", value, checked)} /></div>
               <div><Label htmlFor="household-size">Household size <span className="font-normal text-slate-500">(optional)</span></Label><Input id="household-size" className={fieldClassName} value={data.function.householdSize} onChange={(event) => updateFunction("householdSize", event.target.value)} placeholder="e.g. 2 adults and 1 child" /></div>
@@ -249,9 +273,9 @@ export function ProjectWizard() {
           </>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <>
-            <SectionHeading eyebrow="Step 3 of 7" title="Set the design direction" description="Pick a style foundation and the colors that should guide the room." />
+            <SectionHeading eyebrow="Step 4 of 8" title="Set the design direction" description="Pick a style foundation and the colors that should guide the room." />
             <div className="grid gap-6 sm:grid-cols-2">
               <div><Label htmlFor="primary-style">Primary style</Label><select id="primary-style" className={selectClassName} value={data.style.primaryStyle} onChange={(event) => updateStyle("primaryStyle", event.target.value)}><option value="">Choose a style</option>{STYLES.map((style) => <option key={style} value={style}>{style}</option>)}</select><FieldError message={errors.primaryStyle} /></div>
               <div><Label htmlFor="secondary-style">Secondary style <span className="font-normal text-slate-500">(optional)</span></Label><select id="secondary-style" className={selectClassName} value={data.style.secondaryStyle} onChange={(event) => updateStyle("secondaryStyle", event.target.value)}><option value="">None</option>{STYLES.filter((style) => style !== data.style.primaryStyle).map((style) => <option key={style} value={style}>{style}</option>)}</select></div>
@@ -261,32 +285,32 @@ export function ProjectWizard() {
           </>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <>
-            <SectionHeading eyebrow="Step 4 of 7" title="Choose your materials" description="Tell us what to bring into the room and what to leave out." />
+            <SectionHeading eyebrow="Step 5 of 8" title="Choose your materials" description="Tell us what to bring into the room and what to leave out." />
             <div className="grid gap-8 lg:grid-cols-2"><div><h2 className="mb-4 text-lg font-semibold">Preferred</h2><div className="space-y-6">{MATERIAL_GROUPS.map((group) => <div key={group.label}><p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{group.label}</p><ChoiceList values={group.items} selected={data.materials.preferred} onChange={(value, checked) => changeList("materials", "preferred", value, checked)} columns="grid-cols-2" /></div>)}</div></div><div><h2 className="mb-4 text-lg font-semibold">Avoid</h2><div className="space-y-6">{MATERIAL_GROUPS.map((group) => <div key={group.label}><p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{group.label}</p><ChoiceList values={group.items} selected={data.materials.avoid} onChange={(value, checked) => changeList("materials", "avoid", value, checked)} columns="grid-cols-2" /></div>)}</div></div></div>
             <p className="mt-8 text-sm text-slate-500">A material selected as Preferred is automatically removed from Avoid, and vice versa.</p>
           </>
         )}
 
-        {step === 5 && (
+        {step === 6 && (
           <>
-            <SectionHeading eyebrow="Step 5 of 7" title="Prioritize the furniture" description="Select the pieces that matter most, then the pieces that would be nice additions." />
+            <SectionHeading eyebrow="Step 6 of 8" title="Prioritize the furniture" description="Select the pieces that matter most, then the pieces that would be nice additions." />
             <div className="grid gap-8 lg:grid-cols-2"><div><h2 className="mb-4 text-lg font-semibold">Must Have</h2><ChoiceList values={FURNITURE} selected={data.furniture.mustHave} onChange={(value, checked) => changeList("furniture", "mustHave", value, checked)} /></div><div><h2 className="mb-4 text-lg font-semibold">Nice to Have</h2><ChoiceList values={FURNITURE} selected={data.furniture.niceToHave} onChange={(value, checked) => changeList("furniture", "niceToHave", value, checked)} /></div></div>
             <p className="mt-8 text-sm text-slate-500">An item selected as Must Have is automatically removed from Nice to Have, and vice versa.</p>
           </>
         )}
 
-        {step === 6 && (
+        {step === 7 && (
           <>
-            <SectionHeading eyebrow="Step 6 of 7" title="Set your budget" description="Give the design a comfortable range and tell us what to optimize for." />
+            <SectionHeading eyebrow="Step 7 of 8" title="Set your budget" description="Give the design a comfortable range and tell us what to optimize for." />
             <div className="grid gap-6 sm:grid-cols-2"><div><Label htmlFor="currency">Currency</Label><select id="currency" className={selectClassName} value={data.budget.currency} onChange={(event) => updateBudget("currency", event.target.value)}><option value="USD">USD</option><option value="CAD">CAD</option></select></div><div><Label htmlFor="priority">Priority</Label><select id="priority" className={selectClassName} value={data.budget.priority} onChange={(event) => updateBudget("priority", event.target.value)}><option value="">Choose a priority</option>{PRIORITIES.map((priority) => <option key={priority.value} value={priority.value}>{priority.label}</option>)}</select></div><div><Label htmlFor="budget-minimum">Budget minimum <span className="font-normal text-slate-500">(optional)</span></Label><Input id="budget-minimum" type="number" min="0" step="any" className={fieldClassName} value={data.budget.minimum} onChange={(event) => updateBudget("minimum", event.target.value)} placeholder="0" /><FieldError message={errors.minimum} /></div><div><Label htmlFor="budget-maximum">Budget maximum <span className="font-normal text-slate-500">(optional)</span></Label><Input id="budget-maximum" type="number" min="0" step="any" className={fieldClassName} value={data.budget.maximum} onChange={(event) => updateBudget("maximum", event.target.value)} placeholder="0" /><FieldError message={errors.maximum} /></div></div>
           </>
         )}
 
-        {step === 7 && (
+        {step === 8 && (
           <>
-            <SectionHeading eyebrow="Step 7 of 7" title="Review your room" description="Everything looks good? Review your choices, then create the project when saving is connected." />
+            <SectionHeading eyebrow="Step 8 of 8" title="Review your room" description="Everything looks good? Review your choices, then create the project." />
             <div className="space-y-8"><div className="grid gap-6 border-b border-slate-200 pb-8 sm:grid-cols-2"><SummaryList title="Project" items={[data.room.projectName || "Unnamed project", data.room.roomType ? labelize(data.room.roomType) : "No room type"]} /><SummaryList title="Dimensions" items={[`${data.room.width || "-"} x ${data.room.length || "-"}${data.room.height ? ` x ${data.room.height}` : ""} ${data.room.units === "imperial" ? "ft" : "m"}`]} /></div><div className="grid gap-6 border-b border-slate-200 pb-8 sm:grid-cols-2"><SummaryList title="Room functions" items={data.function.roomFunctions} /><SummaryList title="Special requirements" items={data.function.specialRequirements} /><SummaryList title="Household size" items={[data.function.householdSize || "Not specified"]} /><SummaryList title="Additional notes" items={[data.function.additionalNotes || "None"]} /></div><div className="grid gap-6 border-b border-slate-200 pb-8 sm:grid-cols-2"><SummaryList title="Styles" items={[data.style.primaryStyle, data.style.secondaryStyle].filter(Boolean)} /><SummaryList title="Color mood" items={[data.style.colorMood ? labelize(data.style.colorMood) : "Not specified"]} /><SummaryList title="Colors" items={[data.style.primaryColor, data.style.secondaryColor, data.style.accentColor, data.style.metalColor].filter(Boolean)} /></div><div className="grid gap-6 border-b border-slate-200 pb-8 sm:grid-cols-2"><SummaryList title="Preferred Materials" items={data.materials.preferred} /><SummaryList title="Avoid Materials" items={data.materials.avoid} /></div><div className="grid gap-6 border-b border-slate-200 pb-8 sm:grid-cols-2"><SummaryList title="Must Have" items={data.furniture.mustHave} /><SummaryList title="Nice to Have" items={data.furniture.niceToHave} /></div><div className="grid gap-6 sm:grid-cols-2"><SummaryList title="Budget" items={[data.budget.minimum || "No minimum", data.budget.maximum || "No maximum"].map((item) => item === "No minimum" || item === "No maximum" ? item : `${data.budget.currency} ${item}`)} /><SummaryList title="Priority" items={[PRIORITIES.find((priority) => priority.value === data.budget.priority)?.label || "Not specified"]} /></div></div>
             {saveMessage && <p className="mt-8 border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700">{saveMessage}</p>}
           </>
@@ -294,7 +318,7 @@ export function ProjectWizard() {
 
         <div className="mt-10 flex flex-col-reverse gap-3 border-t border-slate-200 pt-6 sm:flex-row sm:justify-between">
           <Button type="button" variant="ghost" onClick={goBack} disabled={step === 1}><ArrowLeft />Back</Button>
-          {step < 7 ? <Button type="button" onClick={goNext}>Continue<ArrowRight /></Button> : <Button type="button" onClick={handleCreateProject} disabled={isPending}>{isPending ? "Creating Project..." : "Create Project"}<Check /></Button>}
+          {step < 8 ? <Button type="button" onClick={goNext}>Continue<ArrowRight /></Button> : <Button type="button" onClick={handleCreateProject} disabled={isPending}>{isPending ? "Creating Project..." : "Create Project"}<Check /></Button>}
         </div>
       </section>
     </div>

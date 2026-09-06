@@ -80,7 +80,7 @@ export const PRIORITIES = [
   { value: "premium_quality", label: "Premium Quality" },
 ] as const;
 
-export type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 export type Units = "imperial" | "metric";
 export type RoomType = (typeof ROOM_TYPES)[number];
 
