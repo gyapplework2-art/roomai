@@ -2,10 +2,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { RoomGeometrySetup } from "@/components/room-geometry/room-geometry-setup";
-import { roomGeometrySchema } from "@/lib/geometry/schema";
+import { roomGeometrySchema, roomOpeningSchema } from "@/lib/geometry/schema";
+import { validateRoomOpenings } from "@/lib/geometry/openings";
 import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
 import { createClient } from "@/lib/supabase/server";
 import type { Json, Tables } from "@/types/database.types";
+import type { RoomOpening } from "@/lib/geometry/types";
 
 export const instant = false;
 
@@ -43,7 +45,7 @@ export default async function RoomGeometryPage({
   if (claimsError || !claims?.claims) redirect("/auth/login");
 
   const { id } = await params;
-  const [projectResult, geometryResult] = await Promise.all([
+  const [projectResult, geometryResult, openingsResult] = await Promise.all([
     supabase
       .from("projects")
       .select("id, name, width_cm, length_cm, height_cm")
@@ -54,13 +56,34 @@ export default async function RoomGeometryPage({
       .select("id, project_id, schema_version, shape_type, template_rotation_degrees, template_mirrored_horizontal, template_mirrored_vertical, vertices, wall_segments, ceiling_height_cm, created_at, updated_at")
       .eq("project_id", id)
       .maybeSingle(),
+      supabase
+        .from("room_openings")
+        .select("id, room_geometry_id, opening_type, wall_segment_id, offset_cm, width_cm, height_cm, sill_height_cm, hinge_side, swing_direction, created_at, updated_at")
+        .order("created_at", { ascending: true }),
   ]);
 
-  if (projectResult.error || !projectResult.data || geometryResult.error) notFound();
+      if (projectResult.error || !projectResult.data || geometryResult.error || openingsResult.error) notFound();
 
   const project = projectResult.data as Project;
   const storedGeometry = geometryResult.data ? parseGeometry(geometryResult.data as GeometryRow) : null;
   if (geometryResult.data && !storedGeometry) notFound();
+  const storedOpenings: RoomOpening[] = storedGeometry && geometryResult.data
+    ? (openingsResult.data ?? []).filter((opening) => opening.room_geometry_id === geometryResult.data?.id).flatMap((opening) => {
+      const parsed = roomOpeningSchema.safeParse({
+        id: opening.id,
+        openingType: opening.opening_type,
+        wallSegmentId: opening.wall_segment_id,
+        offsetCm: opening.offset_cm,
+        widthCm: opening.width_cm,
+        heightCm: opening.height_cm,
+        sillHeightCm: opening.sill_height_cm,
+        hingeSide: opening.hinge_side,
+        swingDirection: opening.swing_direction,
+      });
+      return parsed.success ? [parsed.data] : [];
+    })
+    : [];
+  const validStoredOpenings = storedGeometry && validateRoomOpenings(storedGeometry, storedOpenings).valid ? storedOpenings : [];
 
   return (
     <main className="min-h-screen bg-[#f7f7f4] text-slate-950">
@@ -83,6 +106,7 @@ export default async function RoomGeometryPage({
             lengthCm={project.length_cm}
             ceilingHeightCm={project.height_cm}
             initialGeometry={storedGeometry}
+            initialOpenings={validStoredOpenings}
           />
         </section>
       </div>

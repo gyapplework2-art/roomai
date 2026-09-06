@@ -256,6 +256,8 @@ export function ProjectWizard() {
               lengthCm={Number(data.room.length) * (data.room.units === "metric" ? 100 : 30.48)}
               ceilingHeightCm={data.room.height ? Number(data.room.height) * (data.room.units === "metric" ? 100 : 30.48) : null}
               onChange={setGeometry}
+              openings={[]}
+              onOpeningsChange={() => undefined}
             />
             <FieldError message={errors.geometry} />
           </>

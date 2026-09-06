@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { createRoomGeometryFromTemplate } from "@/lib/geometry/templates";
@@ -10,6 +10,10 @@ import { RoomGeometryPreview } from "@/components/room-geometry/room-geometry-pr
 import { RoomShapeThumbnail } from "@/components/room-geometry/room-shape-thumbnail";
 import { RoomTransformControls } from "@/components/room-geometry/room-transform-controls";
 import { RoomWallDimensionEditor } from "@/components/room-geometry/room-wall-dimension-editor";
+import { RoomOpeningsEditor } from "@/components/room-geometry/room-openings-editor";
+import { adjustOpeningsForTransform } from "@/lib/geometry/openings";
+import { validateRoomOpenings } from "@/lib/geometry/openings";
+import type { RoomOpening } from "@/lib/geometry/types";
 
 const labels: Record<(typeof shapeTypes)[number], string> = {
   rectangle: "Rectangle",
@@ -27,6 +31,9 @@ export function RoomShapeSelector({
   initialGeometry = null,
   onChange,
   onDragActiveChange,
+  openings,
+  onOpeningsChange,
+  onOpeningsValidityChange,
 }: {
   widthCm: number;
   lengthCm: number;
@@ -34,15 +41,28 @@ export function RoomShapeSelector({
   initialGeometry?: RoomGeometry | null;
   onChange: (geometry: RoomGeometry | null) => void;
   onDragActiveChange?: (active: boolean) => void;
+  openings: RoomOpening[];
+  onOpeningsChange: (openings: RoomOpening[]) => void;
+  onOpeningsValidityChange?: (valid: boolean) => void;
 }) {
   const [geometry, setGeometry] = useState<RoomGeometry | null>(initialGeometry);
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [placementType, setPlacementType] = useState<"door" | "window" | null>(null);
+  const [openingWallId, setOpeningWallId] = useState<string | null>(null);
+  const openingsValid = geometry ? validateRoomOpenings(geometry, openings).valid : openings.length === 0;
+
+  useEffect(() => {
+    onOpeningsValidityChange?.(openingsValid);
+  }, [onOpeningsValidityChange, openingsValid]);
 
   function selectShape(shapeType: (typeof shapeTypes)[number]) {
     const nextGeometry = createRoomGeometryFromTemplate(shapeType, widthCm, lengthCm, ceilingHeightCm);
     setGeometry(nextGeometry);
     setSelectedWallId(null);
+    setPlacementType(null);
+    setOpeningWallId(null);
+    onOpeningsChange([]);
     onChange(nextGeometry);
   }
 
@@ -94,12 +114,26 @@ export function RoomShapeSelector({
               setIsDragging(active);
               onDragActiveChange?.(active);
             }}
+            openings={openings}
+            openingPlacementType={placementType}
+            onSelectOpeningWall={(wallId) => setOpeningWallId(wallId)}
           />
-          <RoomTransformControls geometry={geometry} onChange={updateGeometry} disabled={isDragging} />
+          <RoomTransformControls geometry={geometry} onChange={(nextGeometry) => {
+            onOpeningsChange(adjustOpeningsForTransform(geometry, nextGeometry, openings));
+            updateGeometry(nextGeometry);
+          }} disabled={isDragging || placementType !== null} />
           <RoomWallDimensionEditor
             geometry={geometry}
             selectedWallId={selectedWallId}
             onChange={updateGeometry}
+          />
+          <RoomOpeningsEditor
+            geometry={geometry}
+            openings={openings}
+            placementType={placementType}
+            onPlacementTypeChange={setPlacementType}
+            selectedWallId={openingWallId}
+            onChange={onOpeningsChange}
           />
         </div>
       ) : (

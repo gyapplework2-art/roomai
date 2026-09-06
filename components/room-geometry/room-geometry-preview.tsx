@@ -10,10 +10,11 @@ import {
   wallDisplayLabel,
 } from "@/lib/geometry/dimensions";
 import { createDraggedGeometryCandidate, type DragPoint } from "@/lib/geometry/drag";
+import { getOpeningWorldPosition } from "@/lib/geometry/openings";
 import { roomGeometrySchema } from "@/lib/geometry/schema";
 import { normalizeGeometry } from "@/lib/geometry/transforms";
 import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
-import type { RoomGeometry } from "@/lib/geometry/types";
+import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
 
 function bounds(geometry: RoomGeometry) {
   const xs = geometry.vertices.map((vertex) => vertex.xCm);
@@ -35,6 +36,9 @@ export function RoomGeometryPreview({
   onSelectWall,
   onGeometryChange,
   onDragActiveChange,
+  openings = [],
+  openingPlacementType,
+  onSelectOpeningWall,
 }: {
   geometry: RoomGeometry;
   thumbnail?: boolean;
@@ -42,6 +46,9 @@ export function RoomGeometryPreview({
   onSelectWall?: (wallId: string) => void;
   onGeometryChange?: (geometry: RoomGeometry) => void;
   onDragActiveChange?: (active: boolean) => void;
+  openings?: RoomOpening[];
+  openingPlacementType?: "door" | "window" | null;
+  onSelectOpeningWall?: (wallId: string) => void;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<{
@@ -84,6 +91,10 @@ export function RoomGeometryPreview({
   }
 
   function handlePointerDown(event: React.PointerEvent<SVGLineElement>, wallId: string) {
+    if (openingPlacementType && onSelectOpeningWall) {
+      onSelectOpeningWall(wallId);
+      return;
+    }
     if (!onGeometryChange || !onSelectWall) return;
     const wall = geometry.wallSegments.find((candidate) => candidate.id === wallId);
     const startPointer = pointerToSvgPoint(event);
@@ -201,7 +212,7 @@ export function RoomGeometryPreview({
                 role="button"
                 tabIndex={0}
                 aria-label={`${wallDisplayLabel(index)}, ${length.toFixed(1)} centimeters`}
-                onClick={() => onSelectWall(wall.id)}
+                onClick={() => (openingPlacementType && onSelectOpeningWall ? onSelectOpeningWall(wall.id) : onSelectWall(wall.id))}
                 onPointerDown={(event) => handlePointerDown(event, wall.id)}
                 onPointerMove={handlePointerMove}
                 onPointerUp={(event) => finishPointerDrag(event, false)}
@@ -229,6 +240,16 @@ export function RoomGeometryPreview({
                 <tspan x={labelX} dy={labelLineHeight}>{length.toFixed(1)} cm</tspan>
               </text>
             )}
+            {openings.filter((opening) => opening.wallSegmentId === wall.id).map((opening) => {
+              const position = getOpeningWorldPosition(displayGeometry, opening);
+              if (!position) return null;
+              return (
+                <g key={opening.id ?? `${opening.wallSegmentId}-${opening.offsetCm}`} pointerEvents="none">
+                  <line x1={position.start.xCm} y1={position.start.yCm} x2={position.end.xCm} y2={position.end.yCm} stroke="#f7f7f4" strokeWidth="9" vectorEffect="non-scaling-stroke" />
+                  <line x1={position.start.xCm} y1={position.start.yCm} x2={position.end.xCm} y2={position.end.yCm} stroke={opening.openingType === "door" ? "#9a5b36" : "#4d6475"} strokeWidth="5" vectorEffect="non-scaling-stroke" />
+                </g>
+              );
+            })}
           </g>
         );
       })}
