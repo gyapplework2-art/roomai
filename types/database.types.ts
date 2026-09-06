@@ -235,6 +235,112 @@ export type Database = {
         }
         Relationships: []
       }
+      room_geometries: {
+        Row: {
+          ceiling_height_cm: number | null
+          created_at: string
+          id: string
+          project_id: string
+          schema_version: string
+          shape_type: string
+          template_mirrored_horizontal: boolean
+          template_mirrored_vertical: boolean
+          template_rotation_degrees: number
+          updated_at: string
+          vertices: Json
+          wall_segments: Json
+        }
+        Insert: {
+          ceiling_height_cm?: number | null
+          created_at?: string
+          id?: string
+          project_id: string
+          schema_version?: string
+          shape_type: string
+          template_mirrored_horizontal?: boolean
+          template_mirrored_vertical?: boolean
+          template_rotation_degrees?: number
+          updated_at?: string
+          vertices: Json
+          wall_segments: Json
+        }
+        Update: {
+          ceiling_height_cm?: number | null
+          created_at?: string
+          id?: string
+          project_id?: string
+          schema_version?: string
+          shape_type?: string
+          template_mirrored_horizontal?: boolean
+          template_mirrored_vertical?: boolean
+          template_rotation_degrees?: number
+          updated_at?: string
+          vertices?: Json
+          wall_segments?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_geometries_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: true
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      room_openings: {
+        Row: {
+          created_at: string
+          height_cm: number
+          hinge_side: string | null
+          id: string
+          offset_cm: number
+          opening_type: string
+          room_geometry_id: string
+          sill_height_cm: number | null
+          swing_direction: string | null
+          updated_at: string
+          wall_segment_id: string
+          width_cm: number
+        }
+        Insert: {
+          created_at?: string
+          height_cm: number
+          hinge_side?: string | null
+          id?: string
+          offset_cm: number
+          opening_type: string
+          room_geometry_id: string
+          sill_height_cm?: number | null
+          swing_direction?: string | null
+          updated_at?: string
+          wall_segment_id: string
+          width_cm: number
+        }
+        Update: {
+          created_at?: string
+          height_cm?: number
+          hinge_side?: string | null
+          id?: string
+          offset_cm?: number
+          opening_type?: string
+          room_geometry_id?: string
+          sill_height_cm?: number | null
+          swing_direction?: string | null
+          updated_at?: string
+          wall_segment_id?: string
+          width_cm?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_openings_room_geometry_id_fkey"
+            columns: ["room_geometry_id"]
+            isOneToOne: false
+            referencedRelation: "room_geometries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       room_preferences: {
         Row: {
           accent_color: string | null
