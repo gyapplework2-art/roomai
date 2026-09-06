@@ -12,11 +12,13 @@ export function normalizeGeometry(geometry: RoomGeometry): RoomGeometry {
   const minY = Math.min(...geometry.vertices.map((vertex) => vertex.yCm));
   return validateGeometry({
     ...geometry,
+    templateTransform: { ...geometry.templateTransform },
     vertices: geometry.vertices.map((vertex) => ({
       ...vertex,
       xCm: vertex.xCm - minX,
       yCm: vertex.yCm - minY,
     })),
+    wallSegments: geometry.wallSegments.map((wallSegment) => ({ ...wallSegment })),
   });
 }
 

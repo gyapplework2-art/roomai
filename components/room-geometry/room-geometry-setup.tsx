@@ -25,6 +25,7 @@ export function RoomGeometrySetup({
   const [geometry, setGeometry] = useState<RoomGeometry | null>(initialGeometry);
   const [message, setMessage] = useState("");
   const [isPending, setIsPending] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   async function handleSave() {
     if (!geometry || isPending) {
@@ -61,10 +62,11 @@ export function RoomGeometrySetup({
         ceilingHeightCm={ceilingHeightCm}
         initialGeometry={initialGeometry}
         onChange={setGeometry}
+        onDragActiveChange={setIsDragging}
       />
       {message && <p className="border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700">{message}</p>}
       <div className="flex justify-end border-t border-slate-200 pt-6">
-        <Button type="button" size="lg" onClick={handleSave} disabled={isPending || !geometry}>
+        <Button type="button" size="lg" onClick={handleSave} disabled={isPending || isDragging || !geometry}>
           {isPending ? "Saving Room Shape..." : "Save Room Shape"}
         </Button>
       </div>

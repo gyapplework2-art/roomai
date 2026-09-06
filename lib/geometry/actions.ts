@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import { roomGeometrySchema } from "@/lib/geometry/schema";
+import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database.types";
 
@@ -21,6 +22,9 @@ export async function saveRoomGeometry(projectId: string, input: unknown): Promi
   const parsedGeometry = roomGeometrySchema.safeParse(input);
   if (!parsedProjectId.success) return { success: false, error: "not_found" };
   if (!parsedGeometry.success) return { success: false, error: "invalid_geometry" };
+  if (!validateRoomGeometryStructure(parsedGeometry.data).valid) {
+    return { success: false, error: "invalid_geometry" };
+  }
 
   const supabase = await createClient();
   const { data: claims, error: claimsError } = await supabase.auth.getClaims();

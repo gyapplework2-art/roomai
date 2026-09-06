@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { RoomGeometrySetup } from "@/components/room-geometry/room-geometry-setup";
 import { roomGeometrySchema } from "@/lib/geometry/schema";
+import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
 import { createClient } from "@/lib/supabase/server";
 import type { Json, Tables } from "@/types/database.types";
 
@@ -29,7 +30,7 @@ function parseGeometry(row: GeometryRow): ReturnType<typeof roomGeometrySchema.p
     vertices: jsonValue(row.vertices),
     wallSegments: jsonValue(row.wall_segments),
   });
-  return result.success ? result.data : null;
+  return result.success && validateRoomGeometryStructure(result.data).valid ? result.data : null;
 }
 
 export default async function RoomGeometryPage({

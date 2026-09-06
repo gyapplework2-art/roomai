@@ -9,6 +9,7 @@ import type { RoomGeometry } from "@/lib/geometry/types";
 import { RoomGeometryPreview } from "@/components/room-geometry/room-geometry-preview";
 import { RoomShapeThumbnail } from "@/components/room-geometry/room-shape-thumbnail";
 import { RoomTransformControls } from "@/components/room-geometry/room-transform-controls";
+import { RoomWallDimensionEditor } from "@/components/room-geometry/room-wall-dimension-editor";
 
 const labels: Record<(typeof shapeTypes)[number], string> = {
   rectangle: "Rectangle",
@@ -25,18 +26,23 @@ export function RoomShapeSelector({
   ceilingHeightCm,
   initialGeometry = null,
   onChange,
+  onDragActiveChange,
 }: {
   widthCm: number;
   lengthCm: number;
   ceilingHeightCm: number | null;
   initialGeometry?: RoomGeometry | null;
   onChange: (geometry: RoomGeometry | null) => void;
+  onDragActiveChange?: (active: boolean) => void;
 }) {
   const [geometry, setGeometry] = useState<RoomGeometry | null>(initialGeometry);
+  const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   function selectShape(shapeType: (typeof shapeTypes)[number]) {
     const nextGeometry = createRoomGeometryFromTemplate(shapeType, widthCm, lengthCm, ceilingHeightCm);
     setGeometry(nextGeometry);
+    setSelectedWallId(null);
     onChange(nextGeometry);
   }
 
@@ -57,6 +63,7 @@ export function RoomShapeSelector({
               type="button"
               aria-pressed={selected}
               onClick={() => selectShape(shapeType)}
+              disabled={isDragging}
               className={`border p-3 text-left transition-colors ${selected ? "border-slate-950 bg-slate-100" : "border-slate-200 bg-white hover:border-slate-500"}`}
             >
               <RoomShapeThumbnail geometry={thumbnail} />
@@ -78,13 +85,27 @@ export function RoomShapeSelector({
             <h2 className="text-lg font-semibold">{labels[geometry.shapeType]} preview</h2>
             <span className="text-xs uppercase tracking-[0.14em] text-slate-500">Canonical vertices</span>
           </div>
-          <RoomGeometryPreview geometry={geometry} />
-          <RoomTransformControls geometry={geometry} onChange={updateGeometry} />
+          <RoomGeometryPreview
+            geometry={geometry}
+            selectedWallId={selectedWallId}
+            onSelectWall={setSelectedWallId}
+            onGeometryChange={updateGeometry}
+            onDragActiveChange={(active) => {
+              setIsDragging(active);
+              onDragActiveChange?.(active);
+            }}
+          />
+          <RoomTransformControls geometry={geometry} onChange={updateGeometry} disabled={isDragging} />
+          <RoomWallDimensionEditor
+            geometry={geometry}
+            selectedWallId={selectedWallId}
+            onChange={updateGeometry}
+          />
         </div>
       ) : (
         <p className="border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">Choose a room shape to preview and transform it.</p>
       )}
-      <Button type="button" variant="ghost" onClick={() => { setGeometry(null); onChange(null); }}>Clear selection</Button>
+      <Button type="button" variant="ghost" disabled={isDragging} onClick={() => { setGeometry(null); setSelectedWallId(null); onChange(null); }}>Clear selection</Button>
     </div>
   );
 }
