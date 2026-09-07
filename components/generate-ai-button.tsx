@@ -6,12 +6,16 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { generateDesign } from "@/lib/designs/actions";
 
-function errorMessage(error: "not_configured" | "not_found" | "provider_failure" | "invalid_response" | "persistence_failed") {
+function errorMessage(error: "not_configured" | "not_found" | "missing_layout" | "invalid_layout" | "provider_failure" | "invalid_response" | "persistence_failed") {
   switch (error) {
     case "not_configured":
       return "AI generation is not configured.";
     case "not_found":
       return "This project could not be found.";
+    case "missing_layout":
+      return "Please set up the room layout before generating an AI design.";
+    case "invalid_layout":
+      return "Please fix the room layout before generating an AI design.";
     case "invalid_response":
       return "The AI returned an invalid design. Please try again.";
     case "persistence_failed":
