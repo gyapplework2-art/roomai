@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { GenerateAiButton } from "@/components/generate-ai-button";
+import { FurniturePlanButton } from "@/components/furniture-plan-button";
 import { Badge } from "@/components/ui/badge";
 import { labelize } from "@/lib/projects/validation";
 import { createClient } from "@/lib/supabase/server";
@@ -173,6 +174,7 @@ export default async function ProjectPage({
             </>
           )}
         </div>
+        <FurniturePlanButton projectId={project.id} />
       </div>
     </main>
   );
