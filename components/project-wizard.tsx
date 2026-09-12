@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createProject } from "@/lib/projects/actions";
 import { RoomShapeSelector } from "@/components/room-geometry/room-shape-selector";
-import type { RoomGeometry } from "@/lib/geometry/types";
+import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
 import {
   COLOR_MOODS,
   FURNITURE,
@@ -93,6 +93,7 @@ export function ProjectWizard() {
   const [step, setStep] = useState<WizardStep>(1);
   const [data, setData] = useState<WizardData>(initialWizardData);
   const [geometry, setGeometry] = useState<RoomGeometry | null>(null);
+  const [openings, setOpenings] = useState<RoomOpening[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saveMessage, setSaveMessage] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -131,7 +132,7 @@ export function ProjectWizard() {
       return;
     }
     setErrors({});
-    if (step === 1 && !geometry) {
+    if (step === 2 && !geometry) {
       setErrors({ geometry: "Choose a room shape to continue." });
       return;
     }
@@ -165,8 +166,8 @@ export function ProjectWizard() {
 
   function handleCreateProject() {
     const nextErrors = validateStep(1, data);
-    const styleErrors = validateStep(3, data);
-    const budgetErrors = validateStep(6, data);
+    const styleErrors = validateStep(4, data);
+    const budgetErrors = validateStep(7, data);
     const allErrors = { ...nextErrors, ...styleErrors, ...budgetErrors };
 
     if (Object.keys(allErrors).length) {
@@ -178,7 +179,7 @@ export function ProjectWizard() {
     setErrors({});
     setSaveMessage("");
     startTransition(() => {
-      void createProject({ ...data, geometry }).then((result) => {
+      void createProject({ ...data, geometry, openings }).then((result) => {
         if (result.error) {
           setSaveMessage(result.error);
         }
@@ -238,7 +239,7 @@ export function ProjectWizard() {
                 <div key={dimension}>
                   <Label htmlFor={dimension}>{labelize(dimension)} {dimension === "height" && <span className="font-normal text-slate-500">(optional)</span>}</Label>
                   <div className="relative">
-                    <Input id={dimension} type="number" min="0" step="any" className={fieldClassName} value={data.room[dimension]} onChange={(event) => updateRoom(dimension, event.target.value)} placeholder="0" />
+                    <Input id={dimension} type="number" min="0" step="any" className={fieldClassName} value={data.room[dimension]} onChange={(event) => updateRoom(dimension, event.target.value)} placeholder={dimension === "height" ? "Optional" : "0"} />
                     <span className="pointer-events-none absolute right-3 top-2 text-xs text-slate-500">{data.room.units === "imperial" ? "ft" : "m"}</span>
                   </div>
                   <FieldError message={errors[dimension]} />
@@ -256,8 +257,8 @@ export function ProjectWizard() {
               lengthCm={Number(data.room.length) * (data.room.units === "metric" ? 100 : 30.48)}
               ceilingHeightCm={data.room.height ? Number(data.room.height) * (data.room.units === "metric" ? 100 : 30.48) : null}
               onChange={setGeometry}
-              openings={[]}
-              onOpeningsChange={() => undefined}
+              openings={openings}
+              onOpeningsChange={setOpenings}
             />
             <FieldError message={errors.geometry} />
           </>

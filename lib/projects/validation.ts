@@ -181,11 +181,11 @@ export function validateStep(step: WizardStep, data: WizardData) {
     }
   }
 
-  if (step === 3 && !data.style.primaryStyle) {
+  if (step === 4 && !data.style.primaryStyle) {
     errors.primaryStyle = "Choose a primary style.";
   }
 
-  if (step === 6) {
+  if (step === 7) {
     if (!nonNegativeNumber(data.budget.minimum)) errors.minimum = "Use 0 or a positive amount.";
     if (!nonNegativeNumber(data.budget.maximum)) errors.maximum = "Use 0 or a positive amount.";
     if (

@@ -71,6 +71,11 @@ export function RoomShapeSelector({
     onChange(nextGeometry);
   }
 
+  function beginOpeningPlacement(type: "door" | "window" | null) {
+    if (type) setOpeningWallId(selectedWallId);
+    setPlacementType(type);
+  }
+
   return (
     <div className="space-y-8">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -131,7 +136,7 @@ export function RoomShapeSelector({
             geometry={geometry}
             openings={openings}
             placementType={placementType}
-            onPlacementTypeChange={setPlacementType}
+            onPlacementTypeChange={beginOpeningPlacement}
             selectedWallId={openingWallId}
             onChange={onOpeningsChange}
           />
