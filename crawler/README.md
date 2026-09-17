@@ -30,6 +30,28 @@ Vendor price != RoomAI customer price. The contract contains no RoomAI markup, m
 
 `crawler/core/structured_data.py` extracts JSON-LD with the Python standard library. It preserves valid original JSON-LD, tolerates malformed blocks, and identifies schema.org `Product`, `Offer`, and `AggregateOffer` source facts where present. It does not perform vendor-specific parsing, RoomAI normalization, or customer-price calculation. Unit tests use synthetic `example.com` data and mocked HTTP transports only; they never crawl real retailers.
 
+## 6B.3B.4 Article Pilot
+
+`crawler/vendors/article.py` is the first vendor-specific extraction pilot. It accepts already-fetched HTML, reads schema.org Product data first, and uses only a minimal title/meta fallback if structured data is absent or malformed. It produces a `CatalogProduct` source record for the explicit `US` Article market and preserves raw JSON-LD, including Article/brand facts, descriptions, images, offers, SKUs, colors, materials, and variants where publicly present.
+
+The pilot does not discover Article pages, crawl linked pages, infer missing fields, normalize source terms, assess style or room compatibility, calculate customer prices, persist data, or run automatically. Numeric dimensions are populated only where the source explicitly declares centimeters or kilograms; other dimensions remain preserved as source text instead of being guessed.
+
+Fixture tests under `crawler/tests/fixtures/article/` use fictional Article-like products and `example.com` URLs. They require no network access.
+
+For a manually approved, single-product inspection, run this explicit command from the repository root:
+
+```bash
+python -m crawler.jobs.inspect_article_product https://www.article.com/example-product
+```
+
+Before making any manual request, confirm Article robots policies, terms, rate limits, and access restrictions permit it. The command fetches exactly the supplied URL, prints source-fact JSON to stdout, and performs no discovery, AI work, pricing calculation, or database write.
+
+```text
+Crawler = source facts
+Normalizer = standardized RoomAI meaning
+Design Intelligence = aesthetic judgment
+```
+
 ## Local Setup
 
 From the repository root in your real terminal:
