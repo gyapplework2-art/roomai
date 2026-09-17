@@ -26,6 +26,32 @@ future approved catalog identity
 
 `crawler/core/product_resolver.py` produces conservative, non-mutating proposals from explicit vendor, market, identifier, and Article `isRelatedTo` evidence. A related Article record is `related_only`, not an automatic product-family or variant merge. No permanent catalog identity is assigned at this stage.
 
+## 6B.3B.6 Catalog Persistence Plans
+
+```text
+Crawler/adapter
+	↓
+CatalogProduct source facts
+	↓
+Normalizer
+	↓
+Persistence plan
+	↓
+Repository
+	↓
+Supabase catalog/staging
+```
+
+`crawler/core/persistence.py` maps one `CatalogProduct` into a pure, natural-key-based plan for the deployed catalog tables: `catalog_vendors`, `catalog_vendor_markets`, `catalog_products`, `catalog_product_variants`, `catalog_product_dimensions`, `catalog_current_offers`, and `catalog_product_images`. It does not perform database I/O.
+
+The repository boundary in `crawler/core/database.py` resolves database UUIDs after vendor and market upserts. Product identity prefers `(vendor_market, vendor_product_id)` and falls back to `(vendor_market, product_url)`; variants prefer product-plus-SKU, then product-plus-vendor variant ID. Vendor market keys are country-specific, for example `article-us` and `article-ca`.
+
+Plans preserve source fields alongside normalized fields, structured source payload, dimensions, offers, and image ordering. They write only vendor commercial facts, never RoomAI customer prices, markup, or margin. New and uncertain records are staged; missing canonical taxonomy produces a review reason. `isRelatedTo` remains raw evidence and never merges records.
+
+The deployed schema has no standalone source-snapshot or generic review table, so structured snapshots remain in `catalog_products.source_payload` and review intent maps to `needs_taxonomy_review` plus `publication_status='staging'`. Current offers are planned, but price/availability history is intentionally deferred because those tables represent later observations.
+
+Supabase multi-table writes are not claimed to be transactional. Repositories must report partial failure explicitly; idempotent natural keys allow a retry to converge safely. Unit tests use only the in-memory repository and make no live database writes.
+
 The crawler discovers and extracts vendor facts. A future normalizer maps those facts into RoomAI terminology. Design Intelligence makes aesthetic decisions. These responsibilities must not be mixed.
 
 ## Vendor Markets
