@@ -1,8 +1,12 @@
-"""Future sitemap discovery boundary; no sitemap fetching is implemented yet."""
+"""Generic sitemap URL extraction for explicitly fetched XML documents."""
 
-from collections.abc import Iterable
+from xml.etree import ElementTree
 
 
-def discover_from_sitemap(sitemap_url: str) -> Iterable[str]:
-    """Reserve sitemap URL discovery without issuing network requests."""
-    raise NotImplementedError("Sitemap discovery is not implemented yet.")
+def extract_sitemap_urls(xml: str) -> list[str]:
+    """Extract ``<loc>`` values without fetching a sitemap or following nested maps."""
+    try:
+        root = ElementTree.fromstring(xml)
+    except ElementTree.ParseError:
+        return []
+    return [element.text.strip() for element in root.iter() if element.tag.rsplit("}", 1)[-1] == "loc" and element.text and element.text.strip()]

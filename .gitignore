@@ -47,3 +47,4 @@ crawler/__pycache__/
 crawler/**/__pycache__/
 crawler/.pytest_cache/
 crawler/.env
+crawler/output/

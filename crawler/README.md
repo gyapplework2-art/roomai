@@ -52,6 +52,20 @@ The deployed schema has no standalone source-snapshot or generic review table, s
 
 Supabase multi-table writes are not claimed to be transactional. Repositories must report partial failure explicitly; idempotent natural keys allow a retry to converge safely. Unit tests use only the in-memory repository and make no live database writes.
 
+## 6B.3C.1 Article US Sofa Discovery Pilot
+
+This controlled discovery-only pilot finds approximately 20-50 candidate Article US sofa URLs from one manually approved public source page. It accepts a public product sitemap first when available, or a US sofa category/listing page, and never uses search-engine scraping as its catalog source.
+
+Candidate URLs must match `/product/<numeric-id>/<slug>`. Discovery removes fragments, query parameters, and trailing slashes; the explicit numeric page ID is the deduplication key. Different page IDs always remain separate. The output preserves Article, market `US`, category `sofas`, product URL, page ID, source page, source type, and timestamp. It does not extract products, normalize facts, resolve identities, use `isRelatedTo`, price products, or write to Supabase.
+
+Run one bounded, manually approved discovery request from the repository root:
+
+```bash
+python -m crawler.jobs.discover_products article --market US --category sofas --source-url "https://www.article.com/approved-sofa-source" --source-type category --limit 30
+```
+
+For a publicly available product sitemap, use `--source-type sitemap`. Add `--output crawler/output/article_us_sofas_discovery.json` only when you explicitly want a local review artifact; runtime output is ignored by Git. The command prints a summary followed by reviewable candidate JSON, never writes to Supabase, and must be used only in accordance with Article terms, applicable robots policies, rate limits, and access restrictions.
+
 The crawler discovers and extracts vendor facts. A future normalizer maps those facts into RoomAI terminology. Design Intelligence makes aesthetic decisions. These responsibilities must not be mixed.
 
 ## Vendor Markets
