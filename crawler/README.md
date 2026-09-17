@@ -66,6 +66,22 @@ python -m crawler.jobs.discover_products article --market US --category sofas --
 
 For a publicly available product sitemap, use `--source-type sitemap`. Add `--output crawler/output/article_us_sofas_discovery.json` only when you explicitly want a local review artifact; runtime output is ignored by Git. The command prints a summary followed by reviewable candidate JSON, never writes to Supabase, and must be used only in accordance with Article terms, applicable robots policies, rate limits, and access restrictions.
 
+## 6B.3C.2 Article US Sofa Batch Review
+
+This review-only batch accepts the discovery JSON from 6B.3C.1, processes a default of 10 candidates sequentially, and hard-caps the pilot at 50. Each candidate moves through the existing Article adapter, deterministic normalizer, conservative resolution proposal, and persistence-plan mapper. Plans are included for human QA only; the database repository is never imported or applied.
+
+```bash
+python -m crawler.jobs.review_article_batch --input crawler/output/article_us_sofas_discovery.json --limit 10 --output crawler/output/article_us_sofas_batch_review.json
+```
+
+The JSON output contains `summary` counts and per-product review records with source facts, normalized facts, related-product evidence, non-mutating resolution proposals, staging/review reasons, and proposed catalog records. It contains no RoomAI customer price or markup. A fetch, extraction, normalization, or persistence-plan failure is recorded for that product and the sequential batch continues. `isRelatedTo` remains evidence only and does not establish product-family identity.
+
+## 6B.3C.2A Article Rich Attribute Extraction
+
+The Article adapter continues to prioritize JSON-LD Product properties, then supplements them with JSON from scripts explicitly identified as product state. Labeled source attributes such as Color, Finish, Upholstery Material, Fabric, and Leather populate `source_color` or `source_material` only when explicitly present. Other labeled specifications, including frame material, cushion fill, and assembly information, remain in `variant_attributes.article_attributes` with their original labels and values.
+
+Explicit gallery image metadata is collected in source order, exact URLs are deduplicated, and explicitly labeled logos, recommendation assets, and thumbnails are excluded. This layer never derives color/material from a product name, description, image, or `isRelatedTo` record. Source values remain distinct from later deterministic normalized values.
+
 The crawler discovers and extracts vendor facts. A future normalizer maps those facts into RoomAI terminology. Design Intelligence makes aesthetic decisions. These responsibilities must not be mixed.
 
 ## Vendor Markets

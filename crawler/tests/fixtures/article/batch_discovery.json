@@ -1,0 +1,13 @@
+{
+  "summary": {
+    "vendor": "Article",
+    "market": "US",
+    "category": "sofas",
+    "requested_limit": 3
+  },
+  "candidates": [
+    {"vendor": "Article", "vendor_market_code": "US", "source_category": "sofas", "product_url": "https://example.com/article/product/90090/inch-dimension-sofa", "article_page_id": "90090"},
+    {"vendor": "Article", "vendor_market_code": "US", "source_category": "sofas", "product_url": "https://example.com/article/product/40400/broken-sofa", "article_page_id": "40400"},
+    {"vendor": "Article", "vendor_market_code": "US", "source_category": "sofas", "product_url": "https://example.com/article/product/24155/timber-sofa-black", "article_page_id": "24155"}
+  ]
+}

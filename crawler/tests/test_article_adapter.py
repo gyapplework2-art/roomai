@@ -60,6 +60,52 @@ def test_explicit_article_inch_dimensions_flow_to_normalizer_without_losing_sour
     assert normalized_dimensions.source_dimension_text == source_dimensions.source_dimension_text
 
 
+def test_explicit_article_leather_color_material_and_attributes_are_preserved():
+    product = parse_fixture("rich_leather_sofa.html")
+    variant = product.variants[0]
+
+    assert variant.source_color == "Cognac"
+    assert variant.source_material == "Full-aniline leather"
+    assert variant.variant_attributes["article_attributes"] == {
+        "Leather Color": "Cognac",
+        "Upholstery Material": "Full-aniline leather",
+        "Frame Material": "Solid wood",
+        "Cushion Fill": "Foam and fiber",
+        "Assembly Required": "No",
+    }
+
+
+def test_explicit_article_fabric_attributes_remain_separate_from_normalized_values():
+    product = parse_fixture("rich_fabric_sofa.html")
+    variant = product.variants[0]
+    normalized_variant = normalize_product(product).product.variants[0]
+
+    assert variant.source_color == "Cloud Gray"
+    assert variant.source_material == "Performance Basketweave"
+    assert normalized_variant.normalized_color == "gray"
+    assert normalized_variant.normalized_material == "fabric"
+
+
+def test_explicit_gallery_images_are_deduplicated_filtered_and_keep_source_order():
+    product = parse_fixture("rich_leather_sofa.html")
+
+    assert [image.source_url for image in product.variants[0].images] == [
+        "https://example.com/article/hero.jpg",
+        "https://example.com/article/detail.jpg",
+        "https://example.com/article/json-ld-main.jpg",
+    ]
+    assert [image.sort_order for image in product.variants[0].images] == [0, 1, 2]
+
+
+def test_names_and_related_products_do_not_infer_missing_rich_attributes():
+    product = parse_fixture("rich_missing_attributes.html")
+    variant = product.variants[0]
+
+    assert variant.source_color is None
+    assert variant.source_material is None
+    assert variant.variant_attributes["article_attributes"] == {"Frame Material": "Wood"}
+
+
 def test_multiple_variants_preserve_source_colors_without_normalization():
     product = parse_fixture("multi_variant_sofa.html")
 

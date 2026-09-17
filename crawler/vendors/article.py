@@ -8,6 +8,7 @@ normalize source values.
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
+import json
 import re
 from typing import cast
 
@@ -21,6 +22,9 @@ ARTICLE_US_MARKET = "US"
 ProductSourceRecord = CatalogProduct
 _ARTICLE_PRODUCT_PATH = re.compile(r"/product/(\d+)(?:/|$)")
 _MEASUREMENT_TEXT = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)\s*$")
+_COLOR_ATTRIBUTE_NAMES = frozenset({"color", "colour", "finish", "upholstery color", "fabric color", "leather color"})
+_MATERIAL_ATTRIBUTE_NAMES = frozenset({"material", "upholstery", "upholstery material", "fabric", "leather"})
+_NON_PRODUCT_IMAGE_ROLES = frozenset({"logo", "recommendation", "thumbnail"})
 
 
 class ArticleExtractionError(ValueError):
@@ -63,6 +67,34 @@ class _MetaParser(HTMLParser):
             self.title = title or None
 
 
+class _ProductStateParser(HTMLParser):
+    """Collect only scripts explicitly identified as product data."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.blocks: list[str] = []
+        self._collecting = False
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        script_id = (attributes.get("id") or "").lower()
+        data_product = (attributes.get("data-product") or "").lower()
+        if tag == "script" and ("product" in script_id or data_product in {"true", "product"}):
+            self._collecting = True
+            self._parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._collecting:
+            self._parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script" and self._collecting:
+            self.blocks.append("".join(self._parts))
+            self._collecting = False
+            self._parts = []
+
+
 def _text(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
@@ -73,6 +105,45 @@ def _as_dicts(value: object) -> list[dict[str, object]]:
     if isinstance(value, list):
         return [cast(dict[str, object], item) for item in value if isinstance(item, dict)]
     return []
+
+
+def _embedded_product_state(html: str) -> dict[str, object] | None:
+    parser = _ProductStateParser()
+    parser.feed(html)
+    parser.close()
+    for raw in parser.blocks:
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(value, dict):
+            continue
+        product = value.get("product")
+        if isinstance(product, dict):
+            return cast(dict[str, object], product)
+        if any(key in value for key in ("attributes", "gallery", "images")):
+            return cast(dict[str, object], value)
+    return None
+
+
+def _attribute_values(state: dict[str, object] | None) -> tuple[str | None, str | None, dict[str, object]]:
+    if state is None:
+        return None, None, {}
+    color = None
+    material = None
+    preserved: dict[str, object] = {}
+    for attribute in _as_dicts(state.get("attributes") or state.get("specifications")):
+        label = _text(attribute.get("label") or attribute.get("name"))
+        value = _text(attribute.get("value"))
+        if not label or not value:
+            continue
+        preserved[label] = value
+        normalized_label = label.lower()
+        if normalized_label in _COLOR_ATTRIBUTE_NAMES and color is None:
+            color = value
+        if normalized_label in _MATERIAL_ATTRIBUTE_NAMES and material is None:
+            material = value
+    return color, material, preserved
 
 
 def _article_page_id(value: object) -> str | None:
@@ -99,10 +170,12 @@ def _images(value: object) -> list[ProductImage]:
             images.append(ProductImage(source_url=raw_image, sort_order=sort_order))
         elif isinstance(raw_image, dict):
             url = _text(raw_image.get("url") or raw_image.get("contentUrl"))
-            if url and url.startswith(("http://", "https://")):
+            image_role = _text(raw_image.get("role") or raw_image.get("imageRole"))
+            if url and url.startswith(("http://", "https://")) and image_role not in _NON_PRODUCT_IMAGE_ROLES:
                 images.append(
                     ProductImage(
                         source_url=url,
+                        image_role=image_role,
                         alt_text=_text(raw_image.get("caption") or raw_image.get("name")),
                         width_px=_integer(raw_image.get("width")),
                         height_px=_integer(raw_image.get("height")),
@@ -110,6 +183,23 @@ def _images(value: object) -> list[ProductImage]:
                     )
                 )
     return images
+
+
+def _gallery_images(state: dict[str, object] | None) -> list[ProductImage]:
+    if state is None:
+        return []
+    return _images(state.get("gallery") or state.get("images"))
+
+
+def _unique_images(*image_groups: list[ProductImage]) -> list[ProductImage]:
+    unique: list[ProductImage] = []
+    seen_urls: set[str] = set()
+    for image in (image for group in image_groups for image in group):
+        if image.source_url in seen_urls:
+            continue
+        seen_urls.add(image.source_url)
+        unique.append(image.model_copy(update={"sort_order": len(unique)}))
+    return unique
 
 
 def _integer(value: object) -> int | None:
@@ -207,18 +297,23 @@ def _offer(value: object, checked_at: datetime) -> CurrentOffer | None:
     )
 
 
-def _variant(node: dict[str, object], checked_at: datetime) -> CatalogVariant:
+def _variant(
+    node: dict[str, object],
+    checked_at: datetime,
+    state: dict[str, object] | None = None,
+) -> CatalogVariant:
+    state_color, state_material, state_attributes = _attribute_values(state)
     return CatalogVariant(
         vendor_sku=_text(node.get("sku")),
         vendor_variant_id=_text(node.get("@id") or node.get("productID")),
         variant_name=_text(node.get("name")),
-        source_color=_text(node.get("color")),
-        source_material=_text(node.get("material")),
+        source_color=_text(node.get("color")) or state_color,
+        source_material=_text(node.get("material")) or state_material,
         configuration=_text(node.get("model") or node.get("additionalType")),
         seating_capacity=_integer(node.get("seatingCapacity")),
-        variant_attributes={"source": node},
+        variant_attributes={"source": node, "article_attributes": state_attributes},
         dimensions=_dimensions(node),
-        images=_images(node.get("image")),
+        images=_unique_images(_gallery_images(state), _images(node.get("image"))),
         current_offer=_offer(node.get("offers"), checked_at),
     )
 
@@ -249,9 +344,10 @@ class ArticleVendorAdapter(BaseVendorAdapter):
     ) -> ProductSourceRecord:
         """Map JSON-LD source facts to CatalogProduct without semantic normalization."""
         checked_at = fetched_at or datetime.now(timezone.utc)
+        state = _embedded_product_state(source)
         products = extract_products(source)
         if products:
-            return self._from_structured_product(products[0], product_url, checked_at)
+            return self._from_structured_product(products[0], product_url, checked_at, state)
         return self._from_html_fallback(source, product_url)
 
     def _from_structured_product(
@@ -259,6 +355,7 @@ class ArticleVendorAdapter(BaseVendorAdapter):
         facts: StructuredProductFacts,
         requested_url: str | None,
         checked_at: datetime,
+        state: dict[str, object] | None,
     ) -> ProductSourceRecord:
         source = facts.source
         name = facts.name
@@ -266,9 +363,9 @@ class ArticleVendorAdapter(BaseVendorAdapter):
         if not name or not product_url:
             raise ArticleExtractionError("Product structured data must include a name and URL.")
         variant_nodes = _as_dicts(source.get("hasVariant"))
-        variants = [_variant(node, checked_at) for node in variant_nodes]
+        variants = [_variant(node, checked_at, state) for node in variant_nodes]
         if not variants:
-            variants = [_variant(source, checked_at)]
+            variants = [_variant(source, checked_at, state)]
         return CatalogProduct(
             vendor_market_code=self.vendor_market_code,
             vendor_product_id=facts.sku or facts.mpn,
@@ -285,6 +382,7 @@ class ArticleVendorAdapter(BaseVendorAdapter):
                 "article_page_id": _article_page_id(product_url),
                 "related_products": source.get("isRelatedTo"),
                 "related_article_page_ids": _related_article_page_ids(source.get("isRelatedTo")),
+                "article_product_attributes": _attribute_values(state)[2],
             },
             variants=variants,
         )
