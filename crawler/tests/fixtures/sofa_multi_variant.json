@@ -1,0 +1,10 @@
+{
+  "vendor_market_code": "mock-us",
+  "vendor_product_id": "sofa-200",
+  "source_product_name": "Juniper Modular Sofa",
+  "product_url": "https://example.com/products/juniper-modular-sofa",
+  "variants": [
+    {"vendor_sku": "JM-SEA", "source_color": "Sea Glass", "normalized_color": "soft_green", "images": []},
+    {"vendor_sku": "JM-CLAY", "source_color": "Clay", "normalized_color": "terracotta", "images": []}
+  ]
+}

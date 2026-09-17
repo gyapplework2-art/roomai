@@ -1,0 +1,37 @@
+{
+  "vendor_market_code": "mock-us",
+  "vendor_product_id": "sofa-100",
+  "source_product_name": "Harborline Sofa",
+  "source_category": "Living Room",
+  "source_description": "A fictional three-seat sofa.",
+  "source_features": ["Removable cushions", "Solid wood legs"],
+  "product_url": "https://example.com/products/harborline-sofa",
+  "source_payload": {"source": "fixture"},
+  "variants": [
+    {
+      "vendor_sku": "HL-SOFA-OAT",
+      "variant_name": "Oatmeal",
+      "source_color": "Oatmeal",
+      "normalized_color": "warm_beige",
+      "source_material": "Woven fabric",
+      "normalized_material": "fabric",
+      "seating_capacity": 3,
+      "dimensions": {
+        "source_dimension_text": "84 in W x 38 in D x 34 in H",
+        "width_cm": 213.36,
+        "depth_cm": 96.52,
+        "height_cm": 86.36
+      },
+      "images": [{"source_url": "https://example.com/images/harborline.jpg", "image_role": "primary", "sort_order": 0}],
+      "current_offer": {
+        "currency": "USD",
+        "vendor_list_price": 1299.0,
+        "vendor_shipping_fee": 99.0,
+        "source_availability": "In stock",
+        "estimated_delivery_days_min": 5,
+        "estimated_delivery_days_max": 10,
+        "checked_at": "2026-09-17T12:00:00Z"
+      }
+    }
+  ]
+}

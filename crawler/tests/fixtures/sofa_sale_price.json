@@ -1,0 +1,19 @@
+{
+  "vendor_market_code": "mock-us",
+  "vendor_product_id": "sofa-300",
+  "source_product_name": "Cedar Lounge Sofa",
+  "product_url": "https://example.com/products/cedar-lounge-sofa",
+  "variants": [
+    {
+      "vendor_sku": "CL-SOFA-01",
+      "current_offer": {
+        "currency": "USD",
+        "vendor_list_price": 1800.0,
+        "vendor_sale_price": 1450.0,
+        "vendor_shipping_fee": 0.0,
+        "source_availability": "Limited stock",
+        "checked_at": "2026-09-17T12:00:00Z"
+      }
+    }
+  ]
+}

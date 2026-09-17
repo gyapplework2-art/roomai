@@ -40,3 +40,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python crawler
+crawler/.venv/
+crawler/__pycache__/
+crawler/**/__pycache__/
+crawler/.pytest_cache/
+crawler/.env
