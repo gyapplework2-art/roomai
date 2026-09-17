@@ -35,6 +35,17 @@ class CrawlerSettings(BaseSettings):
         ge=0,
         validation_alias="CRAWLER_MIN_REQUEST_INTERVAL_SECONDS",
     )
+    crawler_max_retries: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        validation_alias="CRAWLER_MAX_RETRIES",
+    )
+    crawler_retry_backoff_seconds: float = Field(
+        default=0.5,
+        ge=0,
+        validation_alias="CRAWLER_RETRY_BACKOFF_SECONDS",
+    )
 
     def require_supabase_credentials(self) -> tuple[str, str]:
         """Return worker-only Supabase credentials or raise a clear error."""

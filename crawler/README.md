@@ -24,6 +24,12 @@ Vendor-specific logic belongs in `crawler/vendors/`. Adapters must respect vendo
 
 Vendor price != RoomAI customer price. The contract contains no RoomAI markup, margin, or customer selling price. Future Supabase persistence will store source facts, while future nightly jobs refresh vendor price/availability and weekly jobs discover products.
 
+## Generic Acquisition
+
+`crawler/core/fetcher.py` provides reusable HTTP/HTTPS acquisition with a configured User-Agent, redirects, bounded retries for transient failures, exponential backoff, and request throttling. It is country-neutral and has no anti-bot or access-control bypassing behavior.
+
+`crawler/core/structured_data.py` extracts JSON-LD with the Python standard library. It preserves valid original JSON-LD, tolerates malformed blocks, and identifies schema.org `Product`, `Offer`, and `AggregateOffer` source facts where present. It does not perform vendor-specific parsing, RoomAI normalization, or customer-price calculation. Unit tests use synthetic `example.com` data and mocked HTTP transports only; they never crawl real retailers.
+
 ## Local Setup
 
 From the repository root in your real terminal:
