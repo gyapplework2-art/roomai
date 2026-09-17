@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from crawler.core.normalizer import normalize_product
 from crawler.vendors.article import ARTICLE_US_MARKET, ARTICLE_VENDOR, ArticleExtractionError, ArticleVendorAdapter
 
 
@@ -38,6 +39,25 @@ def test_dimensions_images_and_offer_are_extracted_when_explicitly_present():
     assert variant.current_offer is not None
     assert variant.current_offer.currency == "USD"
     assert variant.current_offer.vendor_sale_price == 1699
+
+
+def test_explicit_article_inch_dimensions_flow_to_normalizer_without_losing_source_evidence():
+    product = parse_fixture("inch_dimensions_sofa.html")
+    source_dimensions = product.variants[0].dimensions
+    normalized_dimensions = normalize_product(product).product.variants[0].dimensions
+
+    assert source_dimensions is not None
+    assert source_dimensions.source_dimension_text == "width: 90 in; depth: 35 in; height: 32 in"
+    assert source_dimensions.dimension_details == {
+        "width": {"value": 90.0, "unit": "in"},
+        "depth": {"value": 35.0, "unit": "in"},
+        "height": {"value": 32.0, "unit": "in"},
+    }
+    assert normalized_dimensions is not None
+    assert normalized_dimensions.width_cm == 228.6
+    assert normalized_dimensions.depth_cm == 88.9
+    assert normalized_dimensions.height_cm == 81.28
+    assert normalized_dimensions.source_dimension_text == source_dimensions.source_dimension_text
 
 
 def test_multiple_variants_preserve_source_colors_without_normalization():

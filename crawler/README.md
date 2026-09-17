@@ -10,6 +10,22 @@ Normalizer = standardized RoomAI meaning
 Design Intelligence = aesthetic judgment
 ```
 
+## 6B.3B.5 Normalization and Resolution
+
+```text
+SOURCE FACT
+	↓
+NORMALIZED FACT
+	↓
+RESOLUTION PROPOSAL
+	↓
+future approved catalog identity
+```
+
+`crawler/core/normalizer.py` deterministically normalizes explicitly supplied units, source colors/materials, and availability while preserving every source value. Unknown units or terms remain unnormalized and are flagged for review; names are never mined for attributes.
+
+`crawler/core/product_resolver.py` produces conservative, non-mutating proposals from explicit vendor, market, identifier, and Article `isRelatedTo` evidence. A related Article record is `related_only`, not an automatic product-family or variant merge. No permanent catalog identity is assigned at this stage.
+
 The crawler discovers and extracts vendor facts. A future normalizer maps those facts into RoomAI terminology. Design Intelligence makes aesthetic decisions. These responsibilities must not be mixed.
 
 ## Vendor Markets

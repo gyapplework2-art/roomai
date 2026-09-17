@@ -20,6 +20,7 @@ ARTICLE_VENDOR = "Article"
 ARTICLE_US_MARKET = "US"
 ProductSourceRecord = CatalogProduct
 _ARTICLE_PRODUCT_PATH = re.compile(r"/product/(\d+)(?:/|$)")
+_MEASUREMENT_TEXT = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)\s*$")
 
 
 class ArticleExtractionError(ValueError):
@@ -138,6 +139,19 @@ def _unit(value: object) -> str | None:
     return None
 
 
+def _dimension_detail(value: object) -> dict[str, float | str] | None:
+    if isinstance(value, dict):
+        numeric_value = _number(value)
+        unit = _unit(value)
+        if numeric_value is not None and unit:
+            return {"value": numeric_value, "unit": unit}
+    if isinstance(value, str):
+        match = _MEASUREMENT_TEXT.fullmatch(value)
+        if match:
+            return {"value": float(Decimal(match.group(1))), "unit": match.group(2)}
+    return None
+
+
 def _dimension_text(node: dict[str, object]) -> str | None:
     parts: list[str] = []
     for name in ("width", "depth", "height", "weight"):
@@ -155,6 +169,7 @@ def _dimension_text(node: dict[str, object]) -> str | None:
 
 def _dimensions(node: dict[str, object]) -> ProductDimensions | None:
     values: dict[str, float | None] = {"width_cm": None, "depth_cm": None, "height_cm": None, "weight_kg": None}
+    details: dict[str, object] = {}
     for source_name, target_name, accepted_units in (
         ("width", "width_cm", {"cm", "centimeter", "centimeters", "CMT"}),
         ("depth", "depth_cm", {"cm", "centimeter", "centimeters", "CMT"}),
@@ -162,12 +177,15 @@ def _dimensions(node: dict[str, object]) -> ProductDimensions | None:
         ("weight", "weight_kg", {"kg", "kilogram", "kilograms", "KGM"}),
     ):
         raw = node.get(source_name)
+        detail = _dimension_detail(raw)
+        if detail:
+            details[source_name] = detail
         if raw is not None and _unit(raw) in accepted_units:
             values[target_name] = _number(raw)
     source_text = _dimension_text(node)
-    if source_text is None and not any(value is not None for value in values.values()):
+    if source_text is None and not details and not any(value is not None for value in values.values()):
         return None
-    return ProductDimensions(source_dimension_text=source_text, **values)
+    return ProductDimensions(source_dimension_text=source_text, dimension_details=details, **values)
 
 
 def _offer(value: object, checked_at: datetime) -> CurrentOffer | None:
