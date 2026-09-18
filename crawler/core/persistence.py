@@ -21,6 +21,7 @@ class VendorMarketPlan:
     market_code: str
     base_url: str
     currency_code: str
+    default_locale: str
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,14 @@ def build_persistence_plan(product: CatalogProduct) -> CatalogPersistencePlan:
         ))
     return CatalogPersistencePlan(
         vendor=VendorPlan(vendor_slug, vendor_name, base_url),
-        vendor_market=VendorMarketPlan(vendor_slug, country_code, f"{vendor_slug}-{country_code.lower()}", base_url, currency),
+        vendor_market=VendorMarketPlan(
+            vendor_slug,
+            country_code,
+            f"{vendor_slug}-{country_code.lower()}",
+            base_url,
+            currency,
+            "en-US" if country_code == "US" else "",
+        ),
         product_natural_key=product_key,
         canonical_furniture_type_code=source_product.canonical_furniture_type_code,
         product={

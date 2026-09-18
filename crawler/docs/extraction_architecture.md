@@ -79,3 +79,15 @@ Article retains its own page-ID and configured URL-semantic evidence because tha
 This is a vendor-two architecture checkpoint, not a new extraction contract. `inspect_ikea_product.py` fetches one explicitly supplied IKEA US URL, invokes the existing adapter and normalizer, and emits a review-only source-versus-normalized report. It never discovers products, persists records, or calculates customer pricing.
 
 Article-specific behavior must not become the generic contract. IKEA-specific behavior must not become the generic contract. A capability belongs in `crawler/core` only when it represents a reusable source pattern, preferably demonstrated by more than one vendor. Vendor adapters should primarily contain vendor identity, stable configuration, and truly vendor-specific mapping.
+
+## 6B.3C.5A Catalog Persistence Preflight
+
+```text
+Extraction -> Evidence resolution -> Normalization -> Persistence plan -> DB dry run -> future staging persistence
+```
+
+`crawler/core/dry_run.py` renders the operations that a future repository would perform for one normalized plan. The dry run does not import or call a database repository, execute SQL, or write to Supabase. It uses natural references such as `country:US`, `market:ikea-us`, and product/variant natural keys where future persistence will resolve UUID foreign keys.
+
+The preflight targets `catalog_vendors`, `catalog_countries`, `catalog_vendor_markets`, `catalog_products`, `catalog_product_variants`, `catalog_product_dimensions`, `catalog_product_images`, and `catalog_current_offers`. Products and variants remain `staging`; taxonomy review is visible but does not itself block staging. Missing vendor, market, country configuration, product identity, or variant identity blocks future writes.
+
+Only source vendor list/current price, shipping fee, currency, availability, and delivery facts appear in a dry run. `vendor_sale_price` continues to mean the current vendor price when source data does not distinguish an active sale from a standard current price. RoomAI markup, margin, and customer price are excluded.
