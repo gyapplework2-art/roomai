@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal, Mapping
 
+from crawler.core.attribute_normalizer import normalize_boolean, normalize_cushion_fill, normalize_material
 from crawler.core.taxonomy import CANONICAL_TYPES
 
 AttributeValueType = Literal["string", "boolean", "integer", "measurement"]
@@ -93,6 +94,17 @@ _LIGHTING = (
     "shade_material", "base_material", "bulb_type", "bulb_base", "bulb_count", "dimmable",
     "integrated_led", "light_direction", "assembly_required",
 )
+
+_DESIGN_ATTRIBUTE_LABELS = MappingProxyType({
+    "upholstery": "upholstery",
+    "upholstery material": "upholstery",
+    "fabric": "upholstery",
+    "frame material": "frame_material",
+    "frame": "frame_material",
+    "cushion fill": "cushion_fill",
+    "seat cushion": "cushion_fill",
+    "assembly required": "assembly_required",
+})
 
 FURNITURE_TYPE_ATTRIBUTES: Mapping[str, tuple[str, ...]] = MappingProxyType({
     "sofa": _UPHOLSTERED_SEATING,
@@ -199,6 +211,48 @@ def applicable_attributes(furniture_type_code: str | None) -> tuple[str, ...]:
 
 def is_attribute_applicable(furniture_type_code: str | None, attribute_name: str) -> bool:
     return attribute_name in applicable_attributes(furniture_type_code)
+
+
+def normalized_labeled_design_attributes(
+    furniture_type_code: str | None,
+    variant_attributes: Mapping[str, object],
+) -> dict[str, object]:
+    """Normalize supported explicit labeled design attributes when applicable.
+
+    Raw vendor collections remain the provenance; no attributes are inferred from
+    applicability, prose, URLs, names, descriptions, or missing labels.
+    """
+    normalized: dict[str, object] = {}
+    for collection_key in ("article_attributes", "ikea_labeled_attributes"):
+        collection = variant_attributes.get(collection_key)
+        if not isinstance(collection, dict):
+            continue
+        for label, raw_value in collection.items():
+            attribute_name = _design_attribute_for_label(label)
+            if attribute_name is None or not is_attribute_applicable(furniture_type_code, attribute_name):
+                continue
+            value = _normalize_design_attribute_value(attribute_name, raw_value)
+            if value is not None:
+                normalized[attribute_name] = value
+    return normalized
+
+
+def _design_attribute_for_label(label: object) -> str | None:
+    if not isinstance(label, str):
+        return None
+    return _DESIGN_ATTRIBUTE_LABELS.get(" ".join(label.strip().casefold().split()))
+
+
+def _normalize_design_attribute_value(attribute_name: str, value: object) -> object | None:
+    if not isinstance(value, str):
+        return None
+    if attribute_name in {"upholstery", "frame_material"}:
+        return normalize_material(value)
+    if attribute_name == "cushion_fill":
+        return normalize_cushion_fill(value)
+    if attribute_name == "assembly_required":
+        return normalize_boolean(value)
+    return None
 
 
 _validate_registry()

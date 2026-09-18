@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 from crawler.core.attribute_normalizer import normalize_color, normalize_material, normalize_style
+from crawler.core.design_attributes import normalized_labeled_design_attributes
 from crawler.core.evidence_resolution import resolve_attribute, variant_attribute_candidates
 from crawler.core.taxonomy import resolve_furniture_type
 from crawler.models.product import CatalogProduct, CatalogVariant, CurrentOffer, ProductDimensions
@@ -78,6 +79,7 @@ def _normalize_offer(offer: CurrentOffer | None) -> CurrentOffer | None:
 def _normalize_variant(
     variant: CatalogVariant,
     url_evidence: dict[str, object],
+    furniture_type_code: str | None,
     reasons: list[str],
 ) -> CatalogVariant:
     candidates = variant_attribute_candidates(
@@ -106,7 +108,10 @@ def _normalize_variant(
         "style": [candidate.__dict__ | {"selected": candidate == style.selected} for candidate in style.candidates],
     }
     existing_normalized_attributes = variant.variant_attributes.get("normalized_attributes")
-    normalized_attributes = existing_normalized_attributes if isinstance(existing_normalized_attributes, dict) else {}
+    normalized_attributes = {
+        **(existing_normalized_attributes if isinstance(existing_normalized_attributes, dict) else {}),
+        **normalized_labeled_design_attributes(furniture_type_code, variant.variant_attributes),
+    }
     return variant.model_copy(update={
         "source_color": selected_color,
         "source_material": selected_material,
@@ -130,13 +135,12 @@ def normalize_product(product: CatalogProduct) -> NormalizationResult:
 
     raw_evidence = product.source_payload.get("attribute_evidence")
     url_evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
+    taxonomy = resolve_furniture_type(product)
 
     variants = [
-        _normalize_variant(variant, url_evidence, reasons)
+        _normalize_variant(variant, url_evidence, taxonomy.furniture_type_code, reasons)
         for variant in product.variants
     ]
-
-    taxonomy = resolve_furniture_type(product)
 
     if taxonomy.review_required:
         reasons.append("taxonomy_review")

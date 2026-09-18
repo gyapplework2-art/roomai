@@ -17,6 +17,7 @@ _COLOR_VALUES = {
 _MATERIAL_VALUES = {
     "fabric": "fabric", "leather": "leather", "velvet": "velvet", "polyester": "polyester",
     "polyester fabric": "polyester", "linen": "linen", "cotton": "cotton", "wool": "wool",
+    "full aniline leather": "leather", "full grain leather": "leather",
     "boucle": "boucle", "bouclé": "boucle", "chenille": "chenille", "microfiber": "microfiber",
     "faux leather": "faux_leather", "vegan leather": "vegan_leather", "rattan": "rattan",
     "wicker": "wicker", "bamboo": "bamboo", "wood": "wood", "solid wood": "wood",
@@ -25,7 +26,7 @@ _MATERIAL_VALUES = {
     "metal": "metal", "steel": "steel", "brass": "brass", "iron": "iron",
     "stainless steel": "stainless_steel", "aluminum": "aluminum", "glass": "glass",
     "marble": "marble", "ceramic": "ceramic", "stone": "stone", "concrete": "concrete",
-    "performance basketweave": "fabric", "woven fabric": "fabric",
+    "performance basketweave": "fabric", "woven fabric": "fabric", "performance velvet": "velvet",
 }
 _STYLE_VALUES = {
     "modern": "modern",
@@ -86,3 +87,27 @@ def normalize_style(value: str | None) -> str | None:
     if not value:
         return None
     return _STYLE_VALUES.get(_normalized_style_words(value))
+
+
+def normalize_cushion_fill(value: str | None) -> str | None:
+    """Normalize explicit cushion-fill labels without inferring composition."""
+    if not value:
+        return None
+    normalized = _normalized_words(value)
+    return {
+        "foam": "foam",
+        "foam and fiber": "foam_and_fiber",
+        "pocket springs and foam": "pocket_springs_and_foam",
+    }.get(normalized)
+
+
+def normalize_boolean(value: str | None) -> bool | None:
+    """Normalize explicit yes/no-style labels without treating absence as false."""
+    if not value:
+        return None
+    normalized = _normalized_words(value)
+    if normalized in {"yes", "true"}:
+        return True
+    if normalized in {"no", "false"}:
+        return False
+    return None

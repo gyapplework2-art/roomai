@@ -1,9 +1,33 @@
+from datetime import datetime, timezone
+from pathlib import Path
+
 import pytest
 
-from crawler.core.attribute_normalizer import normalize_color, normalize_material, normalize_style
+from crawler.core.attribute_normalizer import normalize_boolean, normalize_color, normalize_cushion_fill, normalize_material, normalize_style
 from crawler.core.evidence_resolution import AttributeCandidate, resolve_attribute, variant_attribute_candidates
 from crawler.core.normalizer import normalize_product
 from crawler.models.product import CatalogProduct, CatalogVariant
+from crawler.vendors.article import ArticleVendorAdapter
+from crawler.vendors.ikea import IkeaVendorAdapter
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _article_fixture(name: str) -> CatalogProduct:
+    return ArticleVendorAdapter().parse_product(
+        (FIXTURES / "article" / name).read_text(),
+        "https://example.com/article/requested-url",
+        datetime(2026, 9, 17, tzinfo=timezone.utc),
+    )
+
+
+def _ikea_fixture(name: str) -> CatalogProduct:
+    return IkeaVendorAdapter().parse_product(
+        (FIXTURES / "ikea" / name).read_text(),
+        "https://example.com/us/en/p/hyltarp-sofa-hallarp-white-s39489645",
+        datetime(2026, 9, 18, tzinfo=timezone.utc),
+    )
 
 
 @pytest.mark.parametrize(
@@ -37,7 +61,8 @@ def test_extended_color_vocabulary(source: str, normalized: str | None):
     ("source", "normalized"),
     [
         ("Fabric", "fabric"), ("Leather", "leather"), ("polyester fabric", "polyester"),
-        ("Solid wood", "wood"), ("Steel", "steel"), ("wood and steel", None),
+        ("Solid wood", "wood"), ("Steel", "steel"), ("Full-aniline leather", "leather"),
+        ("Performance Velvet", "velvet"), ("wood and steel", None),
     ],
 )
 def test_conservative_material_vocabulary(source: str, normalized: str | None):
@@ -65,6 +90,24 @@ def test_extended_material_vocabulary(source: str, normalized: str | None):
 @pytest.mark.parametrize("source", ["wood and steel", "oak & brass", "marble/metal"])
 def test_composite_materials_are_not_collapsed(source: str):
     assert normalize_material(source) is None
+
+
+@pytest.mark.parametrize("source", ["Solid wood, particleboard, plywood", "80 % cotton, 20 % polyester"])
+def test_comma_separated_material_lists_are_not_collapsed(source: str):
+    assert normalize_material(source) is None
+
+
+@pytest.mark.parametrize(
+    ("source", "normalized"),
+    [("Foam", "foam"), ("Foam and fiber", "foam_and_fiber"), ("Pocket springs and foam", "pocket_springs_and_foam"), ("Unknown fill", None)],
+)
+def test_cushion_fill_normalization(source: str, normalized: str | None):
+    assert normalize_cushion_fill(source) == normalized
+
+
+@pytest.mark.parametrize(("source", "normalized"), [("Yes", True), ("No", False), ("true", True), ("false", False), ("Maybe", None), (None, None)])
+def test_boolean_normalization_does_not_invent_missing_false(source: str | None, normalized: bool | None):
+    assert normalize_boolean(source) is normalized
 
 
 @pytest.mark.parametrize(
@@ -249,6 +292,105 @@ def test_normalization_initializes_empty_normalized_attributes_without_inference
     assert variant.normalized_material is None
     assert variant.source_style is None
     assert variant.normalized_style is None
+
+
+def test_article_leather_fixture_populates_supported_design_attributes_and_preserves_raw_values():
+    product = _article_fixture("rich_leather_sofa.html").model_copy(update={"source_category": "Sofas"})
+    raw_attributes = product.variants[0].variant_attributes["article_attributes"]
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {
+        "upholstery": "leather",
+        "frame_material": "wood",
+        "cushion_fill": "foam_and_fiber",
+        "assembly_required": False,
+    }
+    assert variant.variant_attributes["article_attributes"] == raw_attributes == {
+        "Leather Color": "Cognac",
+        "Upholstery Material": "Full-aniline leather",
+        "Frame Material": "Solid wood",
+        "Cushion Fill": "Foam and fiber",
+        "Assembly Required": "No",
+    }
+
+
+def test_article_performance_basketweave_upholstery_uses_material_vocabulary_without_changing_first_class_material():
+    product = _article_fixture("rich_fabric_sofa.html").model_copy(update={"source_category": "Sofas"})
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"]["upholstery"] == "fabric"
+    assert (variant.source_material, variant.normalized_material) == ("Performance Basketweave", "fabric")
+
+
+def test_ikea_seat_cushion_populates_fill_but_composite_material_lists_are_omitted():
+    product = _ikea_fixture("hyltarp_sofa.html").model_copy(update={"source_category": "Sofas"})
+    raw_attributes = product.variants[0].variant_attributes["ikea_labeled_attributes"]
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {
+        "cushion_fill": "pocket_springs_and_foam",
+    }
+    assert "frame_material" not in variant.variant_attributes["normalized_attributes"]
+    assert "upholstery" not in variant.variant_attributes["normalized_attributes"]
+    assert variant.variant_attributes["ikea_labeled_attributes"] == raw_attributes == {
+        "Frame": "Solid wood, particleboard, plywood",
+        "Seat cushion": "Pocket springs and foam",
+        "Fabric": "80 % cotton, 20 % polyester",
+        "Leg": "Solid wood",
+    }
+
+
+def test_unknown_and_missing_design_attributes_are_omitted_without_false_defaults():
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Sofa", source_category="Sofas", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={"article_attributes": {
+            "Upholstery Material": "Mystery textile",
+            "Frame Material": "Unknown frame",
+            "Cushion Fill": "Clouds",
+            "Assembly Required": "Sometimes",
+        }})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+
+
+def test_existing_normalized_attributes_entries_are_preserved_when_design_facts_are_added():
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Sofa", source_category="Sofas", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={
+            "normalized_attributes": {"washable": True},
+            "article_attributes": {"Frame Material": "Solid wood"},
+        })],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"washable": True, "frame_material": "wood"}
+
+
+def test_design_attributes_require_applicability_to_resolved_furniture_type():
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Area rug", source_category="Area rugs", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={"article_attributes": {"Upholstery Material": "Leather", "Assembly Required": "No"}})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+
+
+def test_design_attributes_are_not_inferred_from_name_description_features_url_or_absence():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Leather sofa with foam fill and no assembly required",
+        source_category="Sofas",
+        source_description="Solid wood frame with removable upholstery.",
+        source_features=["Foam and fiber cushions", "Assembly required: no"],
+        product_url="https://example.com/products/leather-solid-wood-foam-sofa",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
 
 
 def test_existing_normalized_attributes_dict_is_preserved_for_future_facts():
