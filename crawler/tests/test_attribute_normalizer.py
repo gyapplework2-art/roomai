@@ -20,12 +20,51 @@ def test_conservative_color_vocabulary(source: str, normalized: str | None):
 @pytest.mark.parametrize(
     ("source", "normalized"),
     [
+        ("Ivory", "ivory"), ("Off White", "off_white"), ("off-white", "off_white"),
+        ("Warm   Beige", "warm_beige"), ("Oatmeal", "warm_beige"), ("Taupe", "taupe"),
+        ("Charcoal", "charcoal"), ("Charcoal Gray", "charcoal"), ("Sage Green", "sage_green"),
+        ("Olive Green", "olive_green"), ("Dark Green", "dark_green"), ("Navy Blue", "navy"),
+        ("Terracotta", "terracotta"), ("Terra Cotta", "terracotta"), ("Burgundy", "burgundy"),
+        ("Natural", "natural"), ("Vendor Charme Tan Performance Fabric", "tan"),
+        ("Unmapped Merchandising", None),
+    ],
+)
+def test_extended_color_vocabulary(source: str, normalized: str | None):
+    assert normalize_color(source) == normalized
+
+
+@pytest.mark.parametrize(
+    ("source", "normalized"),
+    [
         ("Fabric", "fabric"), ("Leather", "leather"), ("polyester fabric", "polyester"),
         ("Solid wood", "wood"), ("Steel", "steel"), ("wood and steel", None),
     ],
 )
 def test_conservative_material_vocabulary(source: str, normalized: str | None):
     assert normalize_material(source) == normalized
+
+
+@pytest.mark.parametrize(
+    ("source", "normalized"),
+    [
+        ("Boucle", "boucle"), ("Bouclé", "boucle"), ("Chenille", "chenille"),
+        ("Microfiber", "microfiber"), ("Faux Leather", "faux_leather"),
+        ("Vegan Leather", "vegan_leather"), ("Rattan", "rattan"), ("Wicker", "wicker"),
+        ("Bamboo", "bamboo"), ("Oak", "oak"), ("Walnut", "walnut"),
+        ("Acacia", "acacia"), ("Teak", "teak"), ("MDF", "mdf"),
+        ("Particleboard", "particleboard"), ("Particle Board", "particleboard"),
+        ("Plywood", "plywood"), ("Brass", "brass"), ("Iron", "iron"),
+        ("Stainless   Steel", "stainless_steel"), ("Ceramic", "ceramic"),
+        ("Stone", "stone"), ("Concrete", "concrete"), ("Unmapped Merchandising", None),
+    ],
+)
+def test_extended_material_vocabulary(source: str, normalized: str | None):
+    assert normalize_material(source) == normalized
+
+
+@pytest.mark.parametrize("source", ["wood and steel", "oak & brass", "marble/metal"])
+def test_composite_materials_are_not_collapsed(source: str):
+    assert normalize_material(source) is None
 
 
 def test_structured_data_beats_labeled_html_and_url_evidence_with_conflict_review():
