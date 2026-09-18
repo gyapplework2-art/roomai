@@ -105,6 +105,8 @@ def _normalize_variant(
         "material": [candidate.__dict__ | {"selected": candidate == material.selected} for candidate in material.candidates],
         "style": [candidate.__dict__ | {"selected": candidate == style.selected} for candidate in style.candidates],
     }
+    existing_normalized_attributes = variant.variant_attributes.get("normalized_attributes")
+    normalized_attributes = existing_normalized_attributes if isinstance(existing_normalized_attributes, dict) else {}
     return variant.model_copy(update={
         "source_color": selected_color,
         "source_material": selected_material,
@@ -112,7 +114,11 @@ def _normalize_variant(
         "normalized_color": normalize_color(selected_color),
         "normalized_material": normalize_material(selected_material),
         "normalized_style": normalize_style(selected_style),
-        "variant_attributes": {**variant.variant_attributes, "attribute_evidence": evidence},
+        "variant_attributes": {
+            **variant.variant_attributes,
+            "normalized_attributes": normalized_attributes,
+            "attribute_evidence": evidence,
+        },
         "dimensions": _normalize_dimensions(variant.dimensions, reasons),
         "current_offer": _normalize_offer(variant.current_offer),
     })

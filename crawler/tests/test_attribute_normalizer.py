@@ -230,6 +230,37 @@ def test_missing_style_evidence_does_not_add_unknown_style():
     assert variant.variant_attributes["attribute_evidence"]["style"] == []
 
 
+def test_normalization_initializes_empty_normalized_attributes_without_inference():
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Modern name is not attribute evidence", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={
+            "article_attributes": {"Frame Material": "Solid wood"},
+            "ikea_labeled_attributes": {"Seat cushion": "Foam"},
+        })],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+    assert variant.variant_attributes["article_attributes"] == {"Frame Material": "Solid wood"}
+    assert variant.variant_attributes["ikea_labeled_attributes"] == {"Seat cushion": "Foam"}
+    assert variant.source_color is None
+    assert variant.normalized_color is None
+    assert variant.source_material is None
+    assert variant.normalized_material is None
+    assert variant.source_style is None
+    assert variant.normalized_style is None
+
+
+def test_existing_normalized_attributes_dict_is_preserved_for_future_facts():
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Sofa", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={"normalized_attributes": {"washable": True}})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"washable": True}
+
+
 def test_normalization_preserves_selected_source_and_all_evidence():
     product = CatalogProduct(
         vendor_market_code="US", source_product_name="Product name is not evidence", product_url="https://example.com/p",
@@ -240,8 +271,10 @@ def test_normalization_preserves_selected_source_and_all_evidence():
     assert (variant.source_color, variant.normalized_color) == ("gray", "gray")
     assert (variant.source_material, variant.normalized_material) == ("Fabric", "fabric")
     assert (variant.source_style, variant.normalized_style) == (None, None)
+    assert variant.variant_attributes["normalized_attributes"] == {}
     assert variant.variant_attributes["attribute_evidence"]["color"][0]["source"] == "structured_data"
     assert variant.variant_attributes["attribute_evidence"]["material"][0]["source"] == "structured_data"
+    assert variant.variant_attributes["attribute_evidence"]["style"] == []
 
 
 def test_third_vendor_uses_generic_normalization_without_adapter_or_inference():
