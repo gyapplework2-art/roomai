@@ -4,7 +4,7 @@ Settings are import-safe: Supabase credentials are only required by callers that
 explicitly request database configuration.
 """
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,9 +14,9 @@ class CrawlerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     supabase_url: str | None = Field(default=None, validation_alias="SUPABASE_URL")
-    supabase_service_role_key: str | None = Field(
+    supabase_secret_key: str | None = Field(
         default=None,
-        validation_alias="SUPABASE_SERVICE_ROLE_KEY",
+        validation_alias=AliasChoices("SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"),
         repr=False,
     )
     crawler_env: str = Field(default="development", validation_alias="CRAWLER_ENV")
@@ -46,14 +46,23 @@ class CrawlerSettings(BaseSettings):
         ge=0,
         validation_alias="CRAWLER_RETRY_BACKOFF_SECONDS",
     )
+    catalog_allow_writes: bool = Field(
+        default=False,
+        validation_alias="CATALOG_ALLOW_WRITES",
+    )
+    catalog_max_products_per_execution: int = Field(
+        default=1,
+        ge=1,
+        validation_alias="CATALOG_MAX_PRODUCTS_PER_EXECUTION",
+    )
 
     def require_supabase_credentials(self) -> tuple[str, str]:
-        """Return worker-only Supabase credentials or raise a clear error."""
-        if not self.supabase_url or not self.supabase_service_role_key:
+        """Return worker-only URL and opaque secret API key or raise a clear error."""
+        if not self.supabase_url or not self.supabase_secret_key:
             raise RuntimeError(
-                "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for database operations."
+                "SUPABASE_URL and SUPABASE_SECRET_KEY are required for database operations."
             )
-        return self.supabase_url, self.supabase_service_role_key
+        return self.supabase_url, self.supabase_secret_key
 
 
 def get_settings() -> CrawlerSettings:

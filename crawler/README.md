@@ -145,4 +145,4 @@ pip install -r crawler/requirements.txt
 pytest crawler/tests
 ```
 
-Copy `.env.example` to `.env` only for a background worker that needs future Supabase persistence. Do not place service-role credentials in Next.js client code.
+Copy `.env.example` to `.env` only for a background worker that needs future Supabase persistence. Use `SUPABASE_SECRET_KEY` for modern opaque `sb_secret_...` keys; `SUPABASE_SERVICE_ROLE_KEY` remains a temporary legacy fallback. Do not place privileged credentials in Next.js client code.

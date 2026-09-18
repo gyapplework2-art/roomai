@@ -98,12 +98,18 @@ def build_persistence_plan(product: CatalogProduct) -> CatalogPersistencePlan:
         if variant.dimensions:
             dimensions = variant.dimensions.model_dump(mode="json")
         offer = variant.current_offer.model_dump(mode="json") if variant.current_offer else None
-        images = tuple(image.model_dump(mode="json") for image in variant.images)
+        if offer is not None and offer["normalized_availability"] is None:
+            offer["normalized_availability"] = "unknown"
+        images = tuple(
+            image.model_dump(mode="json") | {"image_role": image.image_role or "alternate"}
+            for image in variant.images
+        )
         variants.append(VariantPlan(
             natural_key=_variant_key(index, variant.vendor_variant_id, variant.vendor_sku, variant.variant_name),
             values={
                 "vendor_sku": variant.vendor_sku,
                 "vendor_variant_id": variant.vendor_variant_id,
+                "persistence_key": _variant_key(index, variant.vendor_variant_id, variant.vendor_sku, variant.variant_name),
                 "variant_name": variant.variant_name,
                 "source_color": variant.source_color,
                 "normalized_color": variant.normalized_color,
@@ -135,6 +141,7 @@ def build_persistence_plan(product: CatalogProduct) -> CatalogPersistencePlan:
         canonical_furniture_type_code=source_product.canonical_furniture_type_code,
         product={
             "vendor_product_id": source_product.vendor_product_id,
+            "persistence_key": product_key,
             "source_product_name": source_product.source_product_name,
             "source_category": source_product.source_category,
             "source_subcategory": source_product.source_subcategory,

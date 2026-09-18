@@ -91,3 +91,11 @@ Extraction -> Evidence resolution -> Normalization -> Persistence plan -> DB dry
 The preflight targets `catalog_vendors`, `catalog_countries`, `catalog_vendor_markets`, `catalog_products`, `catalog_product_variants`, `catalog_product_dimensions`, `catalog_product_images`, and `catalog_current_offers`. Products and variants remain `staging`; taxonomy review is visible but does not itself block staging. Missing vendor, market, country configuration, product identity, or variant identity blocks future writes.
 
 Only source vendor list/current price, shipping fee, currency, availability, and delivery facts appear in a dry run. `vendor_sale_price` continues to mean the current vendor price when source data does not distinguish an active sale from a standard current price. RoomAI markup, margin, and customer price are excluded.
+
+## 6B.3C.5B Guarded Supabase Executor
+
+The vendor-neutral executor consumes only the generic persistence plan. It uses PostgREST through the existing `httpx` dependency and never imports a vendor adapter. Dry run is the default: a mutation requires both an explicit execution request and `CATALOG_ALLOW_WRITES=true`; programmatic construction also defaults to `write_enabled=False`.
+
+It resolves `catalog_countries` by country code only and never creates countries. Returned UUIDs replace symbolic references before dependent upserts. Conflict targets are `slug`, `market_code`, `vendor_market_id,persistence_key`, `product_id,persistence_key`, `variant_id` for dimensions/offers, and `product_id,variant_id,source_url` for images. Products and variants are staging-only; missing persistence keys, non-staging values, missing country, or unresolved parents block/skip dependent writes.
+
+Persistence is sequential and idempotent, with no claim of multi-table transaction atomicity. Failed parent operations cause dependent operations to be skipped and reported; retrying the same plan is intended to converge. The initial rollout permits one product plan per invocation. No customer pricing or vendor-specific persistence logic is present.
