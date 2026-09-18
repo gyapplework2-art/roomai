@@ -4,16 +4,18 @@ from dataclasses import dataclass
 from typing import Literal
 
 EvidenceSource = Literal["official_api", "structured_data", "labeled_html", "vendor_url_slug"]
+AttributeConcept = Literal["color", "material", "style"]
 _PRIORITY = {"official_api": 1, "structured_data": 2, "labeled_html": 3, "vendor_url_slug": 4}
 _LABEL_CONCEPTS = {
     "color": "color", "colour": "color", "finish": "color", "fabric color": "color", "leather color": "color",
     "material": "material", "upholstery": "material", "upholstery material": "material", "fabric": "material", "leather": "material",
+    "style": "style", "design style": "style", "furniture style": "style", "product style": "style",
 }
 
 
 @dataclass(frozen=True)
 class AttributeCandidate:
-    concept: Literal["color", "material"]
+    concept: AttributeConcept
     value: str
     source: EvidenceSource
     priority: int
@@ -42,13 +44,16 @@ def variant_attribute_candidates(
     source_material: str | None,
     attributes: dict[str, object],
     url_evidence: dict[str, object],
+    source_style: str | None = None,
 ) -> dict[str, list[AttributeCandidate]]:
     """Build generic candidates from explicit fields, labeled attributes, and configured URL evidence."""
-    candidates: dict[str, list[AttributeCandidate]] = {"color": [], "material": []}
+    candidates: dict[str, list[AttributeCandidate]] = {"color": [], "material": [], "style": []}
     if source_color:
         candidates["color"].append(AttributeCandidate("color", source_color, "structured_data", _PRIORITY["structured_data"]))
     if source_material:
         candidates["material"].append(AttributeCandidate("material", source_material, "structured_data", _PRIORITY["structured_data"]))
+    if source_style:
+        candidates["style"].append(AttributeCandidate("style", source_style, "structured_data", _PRIORITY["structured_data"]))
     for collection_key in ("article_attributes", "ikea_labeled_attributes"):
         collection = attributes.get(collection_key)
         if not isinstance(collection, dict):

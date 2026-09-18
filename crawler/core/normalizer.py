@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
-from crawler.core.attribute_normalizer import normalize_color, normalize_material
+from crawler.core.attribute_normalizer import normalize_color, normalize_material, normalize_style
 from crawler.core.evidence_resolution import resolve_attribute, variant_attribute_candidates
 from crawler.core.taxonomy import resolve_furniture_type
 from crawler.models.product import CatalogProduct, CatalogVariant, CurrentOffer, ProductDimensions
@@ -85,25 +85,33 @@ def _normalize_variant(
         variant.source_material,
         variant.variant_attributes,
         url_evidence,
+        source_style=variant.source_style,
     )
     color = resolve_attribute(candidates["color"])
     material = resolve_attribute(candidates["material"])
-    reasons.extend((*color.review_reasons, *material.review_reasons))
+    style = resolve_attribute(candidates["style"])
+    reasons.extend((*color.review_reasons, *material.review_reasons, *style.review_reasons))
     selected_color = color.selected.value if color.selected else None
     selected_material = material.selected.value if material.selected else None
+    selected_style = style.selected.value if style.selected else None
     if selected_color and normalize_color(selected_color) is None:
         reasons.append("unknown_color")
     if selected_material and normalize_material(selected_material) is None:
         reasons.append("unknown_material")
+    if selected_style and normalize_style(selected_style) is None:
+        reasons.append("unknown_style")
     evidence = {
         "color": [candidate.__dict__ | {"selected": candidate == color.selected} for candidate in color.candidates],
         "material": [candidate.__dict__ | {"selected": candidate == material.selected} for candidate in material.candidates],
+        "style": [candidate.__dict__ | {"selected": candidate == style.selected} for candidate in style.candidates],
     }
     return variant.model_copy(update={
         "source_color": selected_color,
         "source_material": selected_material,
+        "source_style": selected_style,
         "normalized_color": normalize_color(selected_color),
         "normalized_material": normalize_material(selected_material),
+        "normalized_style": normalize_style(selected_style),
         "variant_attributes": {**variant.variant_attributes, "attribute_evidence": evidence},
         "dimensions": _normalize_dimensions(variant.dimensions, reasons),
         "current_offer": _normalize_offer(variant.current_offer),
