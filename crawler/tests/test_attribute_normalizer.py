@@ -393,6 +393,64 @@ def test_design_attributes_are_not_inferred_from_name_description_features_url_o
     assert variant.variant_attributes["normalized_attributes"] == {}
 
 
+@pytest.mark.parametrize(
+    ("category", "attributes", "expected"),
+    [
+        ("Dining tables", {"Table top": "Oak"}, {"tabletop_material": "oak"}),
+        ("Coffee tables", {"Top": "Walnut"}, {"tabletop_material": "walnut"}),
+        ("Dining tables", {"Leg": "Solid wood"}, {"base_material": "wood"}),
+        ("Dining tables", {"Tabletop Material": "Oak", "Base Material": "Steel"}, {"tabletop_material": "oak", "base_material": "steel"}),
+    ],
+)
+def test_table_component_materials_normalize_from_explicit_applicable_labels(category: str, attributes: dict[str, str], expected: dict[str, str]):
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Table", source_category=category, product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={"article_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == expected
+    assert variant.variant_attributes["article_attributes"] == attributes
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        {
+            "Top": "Fiberboard, Walnut veneer, Clear acrylic lacquer, Paper foil, Stain",
+            "Leg": "Solid walnut, Clear acrylic lacquer",
+        },
+        {
+            "Table top": "Solid acacia wood, Clear acrylic lacquer, Clear lacquer",
+            "Leg/ Rail": "Solid acacia wood, Acrylic paint",
+            "Bracket": "Steel, Galvanized",
+        },
+    ],
+)
+def test_table_component_composites_and_ambiguous_labels_are_not_collapsed(attributes: dict[str, str]):
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Dining table", source_category="Dining tables", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert "tabletop_material" not in variant.variant_attributes["normalized_attributes"]
+    assert "base_material" not in variant.variant_attributes["normalized_attributes"]
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
+def test_table_component_materials_require_applicable_furniture_type():
+    attributes = {"Table top": "Oak", "Leg": "Steel"}
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Sofa", source_category="Sofas", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
 def test_existing_normalized_attributes_dict_is_preserved_for_future_facts():
     product = CatalogProduct(
         vendor_market_code="US", source_product_name="Sofa", product_url="https://example.com/p",

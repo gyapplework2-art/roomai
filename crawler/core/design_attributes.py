@@ -104,6 +104,12 @@ _DESIGN_ATTRIBUTE_LABELS = MappingProxyType({
     "cushion fill": "cushion_fill",
     "seat cushion": "cushion_fill",
     "assembly required": "assembly_required",
+    "table top": "tabletop_material",
+    "top": "tabletop_material",
+    "tabletop material": "tabletop_material",
+    "top material": "tabletop_material",
+    "leg": "base_material",
+    "base material": "base_material",
 })
 
 FURNITURE_TYPE_ATTRIBUTES: Mapping[str, tuple[str, ...]] = MappingProxyType({
@@ -246,7 +252,7 @@ def _design_attribute_for_label(label: object) -> str | None:
 def _normalize_design_attribute_value(attribute_name: str, value: object) -> object | None:
     if not isinstance(value, str):
         return None
-    if attribute_name in {"upholstery", "frame_material"}:
+    if attribute_name in {"upholstery", "frame_material", "tabletop_material", "base_material"}:
         return normalize_material(value)
     if attribute_name == "cushion_fill":
         return normalize_cushion_fill(value)
