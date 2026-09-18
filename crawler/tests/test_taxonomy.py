@@ -37,6 +37,12 @@ def test_common_bedroom_aliases():
     assert ALIASES["dressers"] == "dresser"
 
 
+def test_observed_storage_bed_and_desk_category_aliases():
+    assert ALIASES["dressers and chests of drawers"] == "dresser"
+    assert ALIASES["bed frames with storage"] == "bed_frame"
+    assert ALIASES["mittzon office desks"] == "desk"
+
+
 def test_unknown_vendor_category_is_not_guessed():
     assert ALIASES.get("mystery relaxation furniture") is None
 
@@ -87,6 +93,30 @@ def test_ikea_chaise_name_refines_broad_modular_sofa_category():
     assert result.product.canonical_furniture_type_code == "sofa_with_chaise"
     assert result.product.needs_taxonomy_review is False
     assert result.product.source_category == "Modular sofas"
+
+
+def test_observed_ikea_storage_bed_and_desk_categories_resolve_exactly():
+    examples = (
+        ("Dressers & chests of drawers", "dresser"),
+        ("Bed frames with storage", "bed_frame"),
+        ("MITTZON office desks", "desk"),
+        ("Dining Tables", "dining_table"),
+        ("Coffee Tables", "coffee_table"),
+    )
+
+    for category, expected_code in examples:
+        result = normalize_product(_product(name="Observed category product", category=category))
+        assert result.product.canonical_furniture_type_code == expected_code
+        assert result.product.needs_taxonomy_review is False
+        assert "taxonomy_review" not in result.review_reasons
+
+
+def test_similar_unsupported_storage_category_remains_unresolved():
+    result = normalize_product(_product(name="Observed category product", category="Dressers and storage combinations"))
+
+    assert result.product.canonical_furniture_type_code is None
+    assert result.product.needs_taxonomy_review is True
+    assert "taxonomy_review" in result.review_reasons
 
 
 def test_unknown_taxonomy_remains_unresolved_and_requires_review():
