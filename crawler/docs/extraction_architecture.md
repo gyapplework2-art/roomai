@@ -22,6 +22,24 @@ Evidence priority is: official API/feed; explicit JSON-LD or structured product 
 
 `crawler/core/html_attributes.py` represents explicit table and definition-list label/value facts generically. Vendor configuration maps recognized labels to concepts. `crawler/core/url_semantics.py` tokenizes a source URL and returns only vendor-configured, deterministic candidates with provenance. URL-derived evidence remains separate from explicit source fields.
 
+## Generic Attribute Resolution and Normalization
+
+```text
+EXTRACTION: vendor-specific source acquisition
+	↓
+EVIDENCE: raw facts plus provenance
+	↓
+RESOLUTION: generic precedence and conflict handling
+	↓
+NORMALIZATION: generic catalog vocabulary
+	↓
+PERSISTENCE: source and normalized values preserved separately
+```
+
+`crawler/core/evidence_resolution.py` applies vendor-neutral precedence: official API/feed, structured data, labeled HTML, then configured vendor URL evidence. It retains every candidate, marks the selected fact, and emits an `attribute_conflict:<concept>` reason when explicit values disagree. `crawler/core/attribute_normalizer.py` maps only selected explicit source color/material values into a conservative shared vocabulary. Missing optional attributes do not create review noise; unknown explicit values stay preserved and unresolved.
+
+Article-specific URL vocabulary stays in the Article adapter. IKEA-specific mappings stay in the IKEA adapter. Generic normalization never depends on vendor identity. AI is not part of deterministic normalization; later AI-enriched values must retain provenance and confidence and cannot silently replace explicit source facts.
+
 ## Promotion Rule
 
 First vendor: prove behavior locally. Second vendor: promote a repeated concept to a generic reusable component. Third and later vendors: reuse that component. Do not prematurely generalize every first-vendor behavior or copy generic parsing into every adapter.
@@ -55,3 +73,9 @@ The Article stop rule applies when richer data exists only in unstable presentat
 IKEA validates three reusable concepts: JSON-LD `ImageObject` metadata, mixed-number source measurements, and explicit labeled construction attributes. These are implemented in `crawler/core/product_media.py`, `crawler/core/measurements.py`, and `crawler/core/html_attributes.py`. The IKEA adapter remains thin: it supplies only vendor/market identity and maps explicit JSON-LD/labeled facts into the existing product contract.
 
 Article retains its own page-ID and configured URL-semantic evidence because that behavior has not yet repeated across a second vendor. IKEA URL tokens are preserved as lower-priority provenance only; no IKEA URL vocabulary or semantic inference is implemented. Future production adapters should reuse the promoted generic helpers rather than duplicate them.
+
+## 6B.3C.3C Real IKEA Validation
+
+This is a vendor-two architecture checkpoint, not a new extraction contract. `inspect_ikea_product.py` fetches one explicitly supplied IKEA US URL, invokes the existing adapter and normalizer, and emits a review-only source-versus-normalized report. It never discovers products, persists records, or calculates customer pricing.
+
+Article-specific behavior must not become the generic contract. IKEA-specific behavior must not become the generic contract. A capability belongs in `crawler/core` only when it represents a reusable source pattern, preferably demonstrated by more than one vendor. Vendor adapters should primarily contain vendor identity, stable configuration, and truly vendor-specific mapping.

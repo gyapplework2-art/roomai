@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
+from crawler.core.attribute_normalizer import normalize_color, normalize_material
+from crawler.core.evidence_resolution import resolve_attribute, variant_attribute_candidates
 from crawler.models.product import CatalogProduct, CatalogVariant, CurrentOffer, ProductDimensions
 
-_COLOR_MAP = {"cloud gray": "gray", "oatmeal": "warm_beige", "charcoal": "gray", "black": "black"}
-_MATERIAL_MAP = {"performance basketweave": "fabric", "woven fabric": "fabric", "leather": "leather"}
 _AVAILABILITY_MAP = {
     "https://schema.org/instock": "in_stock", "instock": "in_stock",
     "https://schema.org/outofstock": "out_of_stock", "outofstock": "out_of_stock",
@@ -74,10 +74,36 @@ def _normalize_offer(offer: CurrentOffer | None) -> CurrentOffer | None:
     return offer.model_copy(update={"normalized_availability": normalize_availability(offer.source_availability)})
 
 
-def _normalize_variant(variant: CatalogVariant, reasons: list[str]) -> CatalogVariant:
+def _normalize_variant(
+    variant: CatalogVariant,
+    url_evidence: dict[str, object],
+    reasons: list[str],
+) -> CatalogVariant:
+    candidates = variant_attribute_candidates(
+        variant.source_color,
+        variant.source_material,
+        variant.variant_attributes,
+        url_evidence,
+    )
+    color = resolve_attribute(candidates["color"])
+    material = resolve_attribute(candidates["material"])
+    reasons.extend((*color.review_reasons, *material.review_reasons))
+    selected_color = color.selected.value if color.selected else None
+    selected_material = material.selected.value if material.selected else None
+    if selected_color and normalize_color(selected_color) is None:
+        reasons.append("unknown_color")
+    if selected_material and normalize_material(selected_material) is None:
+        reasons.append("unknown_material")
+    evidence = {
+        "color": [candidate.__dict__ | {"selected": candidate == color.selected} for candidate in color.candidates],
+        "material": [candidate.__dict__ | {"selected": candidate == material.selected} for candidate in material.candidates],
+    }
     return variant.model_copy(update={
-        "normalized_color": _COLOR_MAP.get(variant.source_color.strip().lower()) if variant.source_color else None,
-        "normalized_material": _MATERIAL_MAP.get(variant.source_material.strip().lower()) if variant.source_material else None,
+        "source_color": selected_color,
+        "source_material": selected_material,
+        "normalized_color": normalize_color(selected_color),
+        "normalized_material": normalize_material(selected_material),
+        "variant_attributes": {**variant.variant_attributes, "attribute_evidence": evidence},
         "dimensions": _normalize_dimensions(variant.dimensions, reasons),
         "current_offer": _normalize_offer(variant.current_offer),
     })
@@ -86,5 +112,7 @@ def _normalize_variant(variant: CatalogVariant, reasons: list[str]) -> CatalogVa
 def normalize_product(product: CatalogProduct) -> NormalizationResult:
     """Return a normalized copy; source fields and original records are never overwritten."""
     reasons: list[str] = []
-    variants = [_normalize_variant(variant, reasons) for variant in product.variants]
+    raw_evidence = product.source_payload.get("attribute_evidence")
+    url_evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
+    variants = [_normalize_variant(variant, url_evidence, reasons) for variant in product.variants]
     return NormalizationResult(product=product.model_copy(update={"variants": variants}), review_reasons=tuple(reasons))

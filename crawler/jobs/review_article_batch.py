@@ -60,6 +60,7 @@ def _review_variant(source_variant, normalized_variant) -> dict[str, object]:
         "source_material": source_variant.source_material,
         "normalized_material": normalized_variant.normalized_material,
         "article_attributes": source_variant.variant_attributes.get("article_attributes", {}),
+        "resolved_attribute_evidence": normalized_variant.variant_attributes.get("attribute_evidence", {}),
         "source_dimension_text": dimensions.source_dimension_text if dimensions else None,
         "source_dimension_details": dimensions.dimension_details if dimensions else {},
         "normalized_dimensions": normalized_dimensions.model_dump(mode="json") if normalized_dimensions else None,

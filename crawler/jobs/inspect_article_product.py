@@ -64,6 +64,9 @@ def _print_rich_attributes(source_product, normalized_product) -> None:
         attributes = source_variant.variant_attributes.get("article_attributes", {})
         if attributes:
             print(f"article_attributes: {json.dumps(attributes, sort_keys=True)}")
+        resolved_evidence = normalized_variant.variant_attributes.get("attribute_evidence", {})
+        if resolved_evidence:
+            print(f"resolved_attribute_evidence: {json.dumps(resolved_evidence, sort_keys=True)}")
     evidence = source_product.source_payload.get("attribute_evidence", {})
     if evidence:
         print(f"attribute_evidence: {json.dumps(evidence, sort_keys=True)}")
