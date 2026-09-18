@@ -27,11 +27,37 @@ _MATERIAL_VALUES = {
     "marble": "marble", "ceramic": "ceramic", "stone": "stone", "concrete": "concrete",
     "performance basketweave": "fabric", "woven fabric": "fabric",
 }
+_STYLE_VALUES = {
+    "modern": "modern",
+    "contemporary": "contemporary",
+    "mid century modern": "mid_century_modern",
+    "midcentury modern": "mid_century_modern",
+    "traditional": "traditional",
+    "transitional": "transitional",
+    "scandinavian": "scandinavian",
+    "scandi": "scandinavian",
+    "minimalist": "minimalist",
+    "minimal": "minimalist",
+    "industrial": "industrial",
+    "farmhouse": "farmhouse",
+    "rustic": "rustic",
+    "coastal": "coastal",
+    "bohemian": "bohemian",
+    "boho": "bohemian",
+    "art deco": "art_deco",
+    "glam": "glam",
+    "glamorous": "glam",
+    "classic": "classic",
+}
 _COMPOSITE_MATERIAL = re.compile(r"(?:\band\b|/|&)")
 
 
 def _normalized_words(value: str) -> str:
     return " ".join(value.lower().replace("-", " ").split())
+
+
+def _normalized_style_words(value: str) -> str:
+    return " ".join(value.lower().replace("-", " ").replace("_", " ").split())
 
 
 def normalize_color(value: str | None) -> str | None:
@@ -53,3 +79,10 @@ def normalize_material(value: str | None) -> str | None:
     if _COMPOSITE_MATERIAL.search(normalized):
         return None
     return _MATERIAL_VALUES.get(normalized)
+
+
+def normalize_style(value: str | None) -> str | None:
+    """Normalize an explicit source style only when it exactly matches controlled vocabulary."""
+    if not value:
+        return None
+    return _STYLE_VALUES.get(_normalized_style_words(value))

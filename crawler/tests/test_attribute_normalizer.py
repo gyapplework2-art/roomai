@@ -1,6 +1,6 @@
 import pytest
 
-from crawler.core.attribute_normalizer import normalize_color, normalize_material
+from crawler.core.attribute_normalizer import normalize_color, normalize_material, normalize_style
 from crawler.core.evidence_resolution import AttributeCandidate, resolve_attribute, variant_attribute_candidates
 from crawler.core.normalizer import normalize_product
 from crawler.models.product import CatalogProduct, CatalogVariant
@@ -65,6 +65,68 @@ def test_extended_material_vocabulary(source: str, normalized: str | None):
 @pytest.mark.parametrize("source", ["wood and steel", "oak & brass", "marble/metal"])
 def test_composite_materials_are_not_collapsed(source: str):
     assert normalize_material(source) is None
+
+
+@pytest.mark.parametrize(
+    ("source", "normalized"),
+    [
+        ("modern", "modern"),
+        ("contemporary", "contemporary"),
+        ("mid_century_modern", "mid_century_modern"),
+        ("traditional", "traditional"),
+        ("transitional", "transitional"),
+        ("scandinavian", "scandinavian"),
+        ("minimalist", "minimalist"),
+        ("industrial", "industrial"),
+        ("farmhouse", "farmhouse"),
+        ("rustic", "rustic"),
+        ("coastal", "coastal"),
+        ("bohemian", "bohemian"),
+        ("art_deco", "art_deco"),
+        ("glam", "glam"),
+        ("classic", "classic"),
+    ],
+)
+def test_style_canonical_vocabulary(source: str, normalized: str):
+    assert normalize_style(source) == normalized
+
+
+@pytest.mark.parametrize(
+    ("source", "normalized"),
+    [
+        ("Mid Century Modern", "mid_century_modern"),
+        ("mid-century modern", "mid_century_modern"),
+        ("midcentury modern", "mid_century_modern"),
+        ("  MID   CENTURY   MODERN  ", "mid_century_modern"),
+        ("Scandi", "scandinavian"),
+        ("minimal", "minimalist"),
+        ("Boho", "bohemian"),
+        ("Art Deco", "art_deco"),
+        ("art-deco", "art_deco"),
+        ("Glamorous", "glam"),
+    ],
+)
+def test_style_supported_aliases_and_formatting(source: str, normalized: str):
+    assert normalize_style(source) == normalized
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        None,
+        "",
+        "Unmapped Merchandising",
+        "modern comfort sofa",
+        "contemporary looking",
+        "modern contemporary",
+        "Scandinavian Minimalist",
+        "traditional/classic",
+        "modern farmhouse",
+        "rustic & industrial",
+    ],
+)
+def test_style_unknown_and_ambiguous_values_are_not_collapsed(source: str | None):
+    assert normalize_style(source) is None
 
 
 def test_structured_data_beats_labeled_html_and_url_evidence_with_conflict_review():
