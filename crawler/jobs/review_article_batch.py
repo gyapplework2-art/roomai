@@ -195,6 +195,7 @@ async def review_candidates(
             "source_description": source_product.source_description,
             "brand": source_product.source_payload.get("brand"),
             "related_products": source_product.source_payload.get("related_products"),
+            "attribute_evidence": source_product.source_payload.get("attribute_evidence", {}),
             "variants": [
                 _review_variant(source_variant, normalized_variant)
                 for source_variant, normalized_variant in zip(source_product.variants, normalization.product.variants, strict=True)

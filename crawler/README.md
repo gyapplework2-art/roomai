@@ -82,6 +82,16 @@ The Article adapter continues to prioritize JSON-LD Product properties, then sup
 
 Explicit gallery image metadata is collected in source order, exact URLs are deduplicated, and explicitly labeled logos, recommendation assets, and thumbnails are excluded. This layer never derives color/material from a product name, description, image, or `isRelatedTo` record. Source values remain distinct from later deterministic normalized values.
 
+## 6B.3C.2A.1 Live Source Investigation
+
+Article is the learning vendor, not the architecture. Before adding another adapter rule, inspect a manually downloaded local HTML response for stable, explicit structured evidence:
+
+```bash
+python -m crawler.jobs.inspect_article_html crawler/output/article_30333_live.html
+```
+
+The diagnostic makes no network requests and reports script inventory, JSON-LD/application-JSON presence, bounded JSON path previews, keyword evidence, and candidate image paths. Description matches are reported only as unstructured text evidence. See [extraction architecture](docs/extraction_architecture.md) for the generic, vendor-configuration, vendor-specific, promotion-after-second-use, and AI-enrichment boundaries.
+
 The crawler discovers and extracts vendor facts. A future normalizer maps those facts into RoomAI terminology. Design Intelligence makes aesthetic decisions. These responsibilities must not be mixed.
 
 ## Vendor Markets

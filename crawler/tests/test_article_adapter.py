@@ -106,6 +106,31 @@ def test_names_and_related_products_do_not_infer_missing_rich_attributes():
     assert variant.variant_attributes["article_attributes"] == {"Frame Material": "Wood"}
 
 
+def test_article_url_semantics_are_preserved_as_lower_priority_evidence():
+    product = ArticleVendorAdapter().parse_product(
+        '<script type="application/ld+json">{"@type":"Product","name":"No Attribute Facts","sku":"SKU1","url":"https://example.com/product/30333/timber-90-leather-sofa-charme-tan"}</script>',
+        "https://example.com/product/30333/timber-90-leather-sofa-charme-tan",
+    )
+
+    assert product.variants[0].source_color is None
+    assert product.variants[0].source_material is None
+    assert product.source_payload["attribute_evidence"] == {
+        "material": [{"value": "leather", "source": "vendor_url_slug", "method": "deterministic"}],
+        "color": [{"value": "charme tan", "source": "vendor_url_slug", "method": "deterministic"}],
+    }
+
+
+def test_explicit_structured_attributes_outrank_url_semantic_evidence():
+    product = ArticleVendorAdapter().parse_product(
+        '<script type="application/ld+json">{"@type":"Product","name":"No Inference","sku":"SKU2","url":"https://example.com/product/30333/timber-90-leather-sofa-charme-tan","color":"Forest Green","material":"Full-grain leather"}</script>',
+        "https://example.com/product/30333/timber-90-leather-sofa-charme-tan",
+    )
+
+    assert product.variants[0].source_color == "Forest Green"
+    assert product.variants[0].source_material == "Full-grain leather"
+    assert product.source_payload["attribute_evidence"]["color"][0]["value"] == "charme tan"
+
+
 def test_multiple_variants_preserve_source_colors_without_normalization():
     product = parse_fixture("multi_variant_sofa.html")
 

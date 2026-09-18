@@ -14,6 +14,7 @@ from typing import cast
 
 from crawler.core.fetcher import FetchResult, HttpFetcher
 from crawler.core.structured_data import StructuredProductFacts, extract_products
+from crawler.core.url_semantics import configured_slug_evidence
 from crawler.models.product import CatalogProduct, CatalogVariant, CurrentOffer, ProductDimensions, ProductImage
 from crawler.vendors.base import BaseVendorAdapter
 
@@ -25,6 +26,8 @@ _MEASUREMENT_TEXT = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)\s*$")
 _COLOR_ATTRIBUTE_NAMES = frozenset({"color", "colour", "finish", "upholstery color", "fabric color", "leather color"})
 _MATERIAL_ATTRIBUTE_NAMES = frozenset({"material", "upholstery", "upholstery material", "fabric", "leather"})
 _NON_PRODUCT_IMAGE_ROLES = frozenset({"logo", "recommendation", "thumbnail"})
+_URL_MATERIAL_TOKENS = {"leather", "fabric", "velvet"}
+_URL_COLOR_PHRASES = {("charme", "tan"), ("cloud", "gray"), ("rain", "cloud", "gray")}
 
 
 class ArticleExtractionError(ValueError):
@@ -311,7 +314,10 @@ def _variant(
         source_material=_text(node.get("material")) or state_material,
         configuration=_text(node.get("model") or node.get("additionalType")),
         seating_capacity=_integer(node.get("seatingCapacity")),
-        variant_attributes={"source": node, "article_attributes": state_attributes},
+        variant_attributes={
+            "source": node,
+            "article_attributes": state_attributes,
+        },
         dimensions=_dimensions(node),
         images=_unique_images(_gallery_images(state), _images(node.get("image"))),
         current_offer=_offer(node.get("offers"), checked_at),
@@ -366,6 +372,11 @@ class ArticleVendorAdapter(BaseVendorAdapter):
         variants = [_variant(node, checked_at, state) for node in variant_nodes]
         if not variants:
             variants = [_variant(source, checked_at, state)]
+        url_evidence = configured_slug_evidence(
+            product_url,
+            material_tokens=_URL_MATERIAL_TOKENS,
+            color_phrases=_URL_COLOR_PHRASES,
+        )
         return CatalogProduct(
             vendor_market_code=self.vendor_market_code,
             vendor_product_id=facts.sku or facts.mpn,
@@ -383,6 +394,7 @@ class ArticleVendorAdapter(BaseVendorAdapter):
                 "related_products": source.get("isRelatedTo"),
                 "related_article_page_ids": _related_article_page_ids(source.get("isRelatedTo")),
                 "article_product_attributes": _attribute_values(state)[2],
+                "attribute_evidence": url_evidence,
             },
             variants=variants,
         )
