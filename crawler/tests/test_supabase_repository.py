@@ -20,8 +20,14 @@ def run(coroutine):
 
 
 class FakeTransport:
-    def __init__(self, missing_country: bool = False, fail_table: str | None = None):
+    def __init__(
+        self,
+        missing_country: bool = False,
+        missing_furniture_type: bool = False,
+        fail_table: str | None = None,
+    ):
         self.missing_country = missing_country
+        self.missing_furniture_type = missing_furniture_type
         self.fail_table = fail_table
         self.calls: list[tuple[str, dict[str, object], str]] = []
         self._ids: dict[str, str] = {}
@@ -29,7 +35,16 @@ class FakeTransport:
     async def resolve_country(self, country_code: str) -> RestResponse:
         self.calls.append(("catalog_countries", {"country_code": country_code}, "resolve"))
         return RestResponse(200, [] if self.missing_country else [{"id": "country-uuid-us"}])
-
+    async def resolve_furniture_type(self, furniture_type_code: str) -> RestResponse:
+        self.calls.append(
+            ("catalog_furniture_types", {"code": furniture_type_code}, "resolve")
+        )
+        return RestResponse(
+            200,
+            []
+            if self.missing_furniture_type
+            else [{"id": f"furniture-type-uuid-{furniture_type_code}"}],
+        )
     async def upsert(self, table: str, values: dict[str, object], conflict_target: str) -> RestResponse:
         self.calls.append((table, values, conflict_target))
         if table == self.fail_table:
@@ -54,7 +69,27 @@ def product(vendor: str):
 
 
 def plan(vendor: str):
-    return build_persistence_plan(product(vendor))
+    persistence_plan = build_persistence_plan(product(vendor))
+
+    if persistence_plan.canonical_furniture_type_code is None:
+        persistence_plan = persistence_plan.__class__(
+            vendor=persistence_plan.vendor,
+            vendor_market=persistence_plan.vendor_market,
+            product_natural_key=persistence_plan.product_natural_key,
+            canonical_furniture_type_code="sofa",
+            product={
+                **persistence_plan.product,
+                "needs_taxonomy_review": False,
+            },
+            variants=persistence_plan.variants,
+            review_reasons=tuple(
+                reason
+                for reason in persistence_plan.review_reasons
+                if reason != "taxonomy_review"
+            ),
+        )
+
+    return persistence_plan
 
 
 def test_default_and_execute_without_environment_guard_make_zero_requests():
@@ -115,7 +150,11 @@ def test_missing_country_skips_dependent_chain_without_creating_country():
 
     assert report.failed_operations == [{"table": "catalog_countries", "reason": "country_not_found"}]
     assert {item["table"] for item in report.skipped_operations} >= {"catalog_vendor_markets", "catalog_products"}
-    assert [call[0] for call in transport.calls] == ["catalog_vendors", "catalog_countries"]
+    assert [call[0] for call in transport.calls] == [
+    "catalog_vendors",
+    "catalog_countries",
+    "catalog_furniture_types",
+]
 
 
 def test_missing_persistence_key_and_non_staging_plan_block_before_writes():
@@ -280,3 +319,49 @@ def test_postgrest_errors_preserve_safe_database_diagnostics_without_secret():
     assert failure["code"] == "23502"
     assert failure["details"] == "Row contains null."
     assert secret not in json.dumps(report.as_dict())
+
+
+def test_canonical_furniture_type_resolves_to_uuid_for_product_write():
+    transport = FakeTransport()
+    persistence_plan = plan("article")
+
+    assert persistence_plan.canonical_furniture_type_code == "sofa"
+
+    report = run(
+        SupabaseCatalogExecutor(
+            transport,
+            settings=settings(True),
+            write_enabled=True,
+        ).execute(
+            persistence_plan,
+            execution_requested=True,
+        )
+    )
+
+    assert report.write_succeeded
+
+    furniture_type_reference = "furniture_type:sofa"
+    expected_furniture_type_id = "furniture-type-uuid-sofa"
+
+    assert (
+        report.resolved_identifiers[furniture_type_reference]
+        == expected_furniture_type_id
+    )
+
+    product_call = next(
+        call
+        for call in transport.calls
+        if call[0] == "catalog_products"
+    )
+
+    product_values = product_call[1]
+
+    assert (
+        product_values["furniture_type_id"]
+        == expected_furniture_type_id
+    )
+
+    assert (
+        product_values["furniture_type_id"]
+        != furniture_type_reference
+    )

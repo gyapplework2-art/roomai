@@ -152,7 +152,7 @@ def build_persistence_plan(product: CatalogProduct) -> CatalogPersistencePlan:
             "normalized_style": None,
             "source_payload": source_product.source_payload,
             "source_hash": source_product.source_hash,
-            "needs_taxonomy_review": bool(review_reasons),
+            "needs_taxonomy_review": source_product.needs_taxonomy_review,
             "publication_status": "staging",
         },
         variants=tuple(variants),

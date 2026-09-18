@@ -17,6 +17,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Persist one catalog product only when both write guards are enabled.")
     parser.add_argument("--vendor", required=True, choices=["article", "ikea"])
     parser.add_argument("--url", required=True)
+    parser.add_argument("--source-category", help="Optional source category preserved from trusted discovery evidence.")
     parser.add_argument("--normalized", action="store_true")
     parser.add_argument("--execute", action="store_true")
     return parser.parse_args()
@@ -26,13 +27,23 @@ def _adapter(vendor: str):
     return ArticleVendorAdapter() if vendor == "article" else IkeaVendorAdapter()
 
 
-async def persist_one(url: str, vendor: str, *, normalized: bool, execute: bool) -> dict[str, object]:
+async def persist_one(
+    url: str,
+    vendor: str,
+    *,
+    normalized: bool,
+    execute: bool,
+    source_category: str | None = None,
+) -> dict[str, object]:
     """Fetch and plan one product; executor mutation needs both explicit guards."""
     fetch_result = await HttpFetcher().fetch(url)
     if not fetch_result.succeeded or fetch_result.response_text is None:
         reason = fetch_result.error.message if fetch_result.error else "No HTML returned."
         raise RuntimeError(f"Product fetch failed: {reason}")
     product = _adapter(vendor).parse_product(fetch_result.response_text, fetch_result.final_url, fetch_result.fetched_at)
+    source_category_fallback = source_category.strip() if isinstance(source_category, str) else ""
+    if not product.source_category and source_category_fallback:
+        product = product.model_copy(update={"source_category": source_category_fallback})
     if normalized:
         product = normalize_product(product).product
     settings = get_settings()
@@ -46,7 +57,13 @@ async def persist_one(url: str, vendor: str, *, normalized: bool, execute: bool)
 
 def main() -> None:
     args = parse_args()
-    print(json.dumps(asyncio.run(persist_one(args.url, args.vendor, normalized=args.normalized, execute=args.execute)), indent=2))
+    print(json.dumps(asyncio.run(persist_one(
+        args.url,
+        args.vendor,
+        normalized=args.normalized,
+        execute=args.execute,
+        source_category=args.source_category,
+    )), indent=2))
 
 
 if __name__ == "__main__":

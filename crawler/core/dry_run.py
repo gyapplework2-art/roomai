@@ -63,6 +63,13 @@ def build_catalog_dry_run(plan: CatalogPersistencePlan) -> CatalogDryRun:
     country_reference = f"country:{plan.vendor_market.country_code}"
     market_reference = f"market:{plan.vendor_market.market_code}"
     product_reference = f"product:{plan.product_natural_key}"
+
+    furniture_type_reference = (
+        f"furniture_type:{plan.canonical_furniture_type_code}"
+        if plan.canonical_furniture_type_code
+        else None
+    )
+
     operations: list[DryRunOperation] = [
         DryRunOperation(
             "catalog_vendors", "upsert", {"slug": plan.vendor.slug},
@@ -84,11 +91,27 @@ def build_catalog_dry_run(plan: CatalogPersistencePlan) -> CatalogDryRun:
             },
             (vendor_reference, country_reference), plan.review_reasons,
         ),
-        DryRunOperation(
-            "catalog_products", "upsert", {"vendor_market": market_reference, "natural_key": plan.product_natural_key},
-            {"vendor_market_id": market_reference, **plan.product}, (market_reference,), plan.review_reasons,
-        ),
     ]
+
+    if furniture_type_reference is not None:
+        operations.append(DryRunOperation(
+            "catalog_furniture_types", "resolve",
+            {"code": plan.canonical_furniture_type_code}, {}, (),
+        ))
+
+    product_values = {"vendor_market_id": market_reference, **plan.product}
+    product_dependencies = [market_reference]
+
+    if furniture_type_reference is not None:
+        product_values["furniture_type_id"] = furniture_type_reference
+        product_dependencies.append(furniture_type_reference)
+
+    operations.append(DryRunOperation(
+        "catalog_products", "upsert",
+        {"vendor_market": market_reference, "natural_key": plan.product_natural_key},
+        product_values, tuple(product_dependencies), plan.review_reasons,
+    ))
+
     for variant in plan.variants:
         variant_reference = f"variant:{product_reference}:{variant.natural_key}"
         operations.append(DryRunOperation(

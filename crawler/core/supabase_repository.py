@@ -28,9 +28,11 @@ class CatalogRestTransport(Protocol):
     async def resolve_country(self, country_code: str) -> RestResponse:
         """Resolve one existing country by ISO code; never create countries."""
 
+    async def resolve_furniture_type(self, furniture_type_code: str) -> RestResponse:
+        """Resolve one existing furniture type by canonical code; never create taxonomy."""
+
     async def upsert(self, table: str, values: dict[str, object], conflict_target: str) -> RestResponse:
         """Upsert one row and return its database id."""
-
 
 class HttpxPostgrestTransport:
     """Small server-only PostgREST transport using worker credentials lazily."""
@@ -50,6 +52,19 @@ class HttpxPostgrestTransport:
         url, _ = self._settings.require_supabase_credentials()
         async with httpx.AsyncClient(base_url=f"{url}/rest/v1", headers=self._headers()) as client:
             response = await client.get("/catalog_countries", params={"country_code": f"eq.{country_code}", "select": "id"})
+        return _response(response)
+
+    async def resolve_furniture_type(self, furniture_type_code: str) -> RestResponse:
+        url, _ = self._settings.require_supabase_credentials()
+        async with httpx.AsyncClient(base_url=f"{url}/rest/v1", headers=self._headers()) as client:
+            response = await client.get(
+                "/catalog_furniture_types",
+                params={
+                    "code": f"eq.{furniture_type_code}",
+                    "is_active": "eq.true",
+                    "select": "id",
+                },
+            )
         return _response(response)
 
     async def upsert(self, table: str, values: dict[str, object], conflict_target: str) -> RestResponse:
@@ -191,7 +206,15 @@ class SupabaseCatalogExecutor:
                 report.skipped_operations.append({"table": operation.target_table, "reason": "dependency_not_resolved"})
                 continue
             if operation.operation == "resolve":
-                await self._resolve_country(operation, report)
+                if operation.target_table == "catalog_countries":
+                    await self._resolve_country(operation, report)
+                elif operation.target_table == "catalog_furniture_types":
+                    await self._resolve_furniture_type(operation, report)
+                else:
+                    report.failed_operations.append({
+                        "table": operation.target_table,
+                        "reason": "unsupported_resolve_operation",
+                    })
             else:
                 await self._upsert(operation, report)
 
@@ -208,7 +231,29 @@ class SupabaseCatalogExecutor:
             report.successful_operations.append(operation.target_table)
         else:
             report.failed_operations.append({"table": operation.target_table, "reason": "country_not_found"})
+    async def _resolve_furniture_type(
+        self,
+        operation: DryRunOperation,
+        report: ExecutionReport,
+    ) -> None:
+        furniture_type_code = operation.natural_key["code"]
+        if self._transport is None:
+            return
 
+        response = await self._transport.resolve_furniture_type(
+            furniture_type_code
+        )
+        reference = f"furniture_type:{furniture_type_code}"
+        resolved_id = response.data[0].get("id") if response.data else None
+
+        if response.status_code < 300 and isinstance(resolved_id, str):
+            report.resolved_identifiers[reference] = resolved_id
+            report.successful_operations.append(operation.target_table)
+        else:
+            report.failed_operations.append({
+                "table": operation.target_table,
+                "reason": "furniture_type_not_found",
+            })
     async def _upsert(self, operation: DryRunOperation, report: ExecutionReport) -> None:
         values = {key: report.resolved_identifiers.get(value, value) if isinstance(value, str) else value for key, value in operation.values.items()}
         if operation.target_table in {"catalog_products", "catalog_product_variants"} and not values.get("persistence_key"):
