@@ -6,6 +6,7 @@ from typing import Literal
 
 from crawler.core.attribute_normalizer import normalize_color, normalize_material
 from crawler.core.evidence_resolution import resolve_attribute, variant_attribute_candidates
+from crawler.core.taxonomy import resolve_furniture_type
 from crawler.models.product import CatalogProduct, CatalogVariant, CurrentOffer, ProductDimensions
 
 _AVAILABILITY_MAP = {
@@ -112,7 +113,29 @@ def _normalize_variant(
 def normalize_product(product: CatalogProduct) -> NormalizationResult:
     """Return a normalized copy; source fields and original records are never overwritten."""
     reasons: list[str] = []
+
     raw_evidence = product.source_payload.get("attribute_evidence")
     url_evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
-    variants = [_normalize_variant(variant, url_evidence, reasons) for variant in product.variants]
-    return NormalizationResult(product=product.model_copy(update={"variants": variants}), review_reasons=tuple(reasons))
+
+    variants = [
+        _normalize_variant(variant, url_evidence, reasons)
+        for variant in product.variants
+    ]
+
+    taxonomy = resolve_furniture_type(product)
+
+    if taxonomy.review_required:
+        reasons.append("taxonomy_review")
+
+    normalized_product = product.model_copy(
+        update={
+            "variants": variants,
+            "canonical_furniture_type_code": taxonomy.furniture_type_code,
+            "needs_taxonomy_review": taxonomy.review_required,
+        }
+    )
+
+    return NormalizationResult(
+        product=normalized_product,
+        review_reasons=tuple(dict.fromkeys(reasons)),
+    )

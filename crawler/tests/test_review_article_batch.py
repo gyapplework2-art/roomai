@@ -51,10 +51,10 @@ def test_batch_reuses_adapter_normalizer_and_persistence_plan_without_repository
 
     product = result["products"][0]
     variant = product["variants"][0]
-    assert product["status"] == "normalization_review"
+    assert product["status"] == "success"
     assert product["normalization_review_reasons"] == []
-    assert product["persistence_review_reasons"] == ["taxonomy_review"]
-    assert product["review_reasons"] == ["taxonomy_review"]
+    assert product["persistence_review_reasons"] == []
+    assert product["review_reasons"] == []
     assert variant["source_dimension_text"] == "width: 90 in; depth: 35 in; height: 32 in"
     assert variant["normalized_dimensions"]["width_cm"] == 228.6
     assert product["persistence_plan"]["product_natural_key"] == "vendor_product_id:ART-INCH-90"
@@ -66,7 +66,7 @@ def test_bad_product_is_isolated_and_later_products_continue():
     fetcher = FixtureFetcher()
     result = run(review_candidates(candidates, fetcher=fetcher))
 
-    assert [product["status"] for product in result["products"]] == ["normalization_review", "extraction_failed", "normalization_review"]
+    assert [product["status"] for product in result["products"]] == ["success", "extraction_failed", "success"]
     assert result["products"][1]["stage"] == "extraction"
     assert result["summary"]["products_failed"] == 1
     assert len(fetcher.calls) == 3

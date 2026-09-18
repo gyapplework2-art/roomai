@@ -99,7 +99,7 @@ def test_missing_critical_identity_blocks_writes_without_hiding_review_state():
 
     assert document.write_allowed is False
     assert set(document.blocking_reasons) == {"missing_product_identity", "missing_variant_identity"}
-    assert "taxonomy_review" in document.review_reasons
+    assert "taxonomy_review"  not in document.review_reasons
 
 
 def test_variant_name_or_source_index_fallback_is_not_a_database_safe_identity():
