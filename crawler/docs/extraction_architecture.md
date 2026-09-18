@@ -39,3 +39,19 @@ AI enrichment should be event/change driven. Future source hashes should trigger
 `article.py` currently owns Article URL/page-ID handling, recognized product-state scripts, Article label aliases, and minimal HTML fallback. JSON-LD traversal, image deduplication, unit normalization, and diagnostic JSON walking are generic candidates. Promote only after a second vendor validates the same pattern.
 
 The Article stop rule applies when richer data exists only in unstable presentation markup, requires JavaScript execution, depends on private internals, or would require accumulating brittle one-off rules. A final Article enhancement is justified only by a stable, explicit, repeatable structured source in manually saved HTML.
+
+## Second-vendor Findings
+
+**Already generic/reusable:** local script inventory, JSON-LD traversal, embedded JSON path diagnostics, labeled table/definition-list attributes, URL tokenization, and provenance reporting.
+
+**Newly promoted generic logic:** `crawler/core/html_diagnostics.py` combines these local-only diagnostics without vendor extraction rules. IKEA uses it as a thin diagnostic consumer.
+
+**IKEA-specific configuration:** only the diagnostic keyword set and explicit `IKEA` / `US` context. No IKEA DOM selectors, URL vocabulary, or product extraction mapping exists yet.
+
+**Not implemented yet:** JavaScript execution, private APIs, unstable generated selectors, an IKEA production adapter, semantic URL interpretation, persistence, normalization changes, or AI enrichment. If saved IKEA HTML offers only these unstable sources, record the limitation and stop rather than adding brittle parsing.
+
+## Article vs IKEA Adapter Comparison
+
+IKEA validates three reusable concepts: JSON-LD `ImageObject` metadata, mixed-number source measurements, and explicit labeled construction attributes. These are implemented in `crawler/core/product_media.py`, `crawler/core/measurements.py`, and `crawler/core/html_attributes.py`. The IKEA adapter remains thin: it supplies only vendor/market identity and maps explicit JSON-LD/labeled facts into the existing product contract.
+
+Article retains its own page-ID and configured URL-semantic evidence because that behavior has not yet repeated across a second vendor. IKEA URL tokens are preserved as lower-priority provenance only; no IKEA URL vocabulary or semantic inference is implemented. Future production adapters should reuse the promoted generic helpers rather than duplicate them.
