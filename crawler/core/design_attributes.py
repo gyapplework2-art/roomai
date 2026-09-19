@@ -5,11 +5,13 @@ It never implies that a product has those attributes.
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 import re
 from types import MappingProxyType
 from typing import Literal, Mapping
 
 from crawler.core.attribute_normalizer import normalize_boolean, normalize_cushion_fill, normalize_material
+from crawler.core.measurements import parse_measurement_text
 from crawler.core.taxonomy import CANONICAL_TYPES
 
 AttributeValueType = Literal["string", "boolean", "integer", "measurement"]
@@ -231,17 +233,42 @@ def normalized_labeled_design_attributes(
     applicability, prose, URLs, names, descriptions, or missing labels.
     """
     normalized: dict[str, object] = {}
-    for collection_key in ("article_attributes", "ikea_labeled_attributes"):
+    for collection_key in ("article_attributes", "ikea_labeled_attributes", "article_html_specifications"):
         collection = variant_attributes.get(collection_key)
         if not isinstance(collection, dict):
             continue
         for label, raw_value in collection.items():
+            if _is_label(label, "pile"):
+                pile_attributes = _normalize_pile_specification(furniture_type_code, raw_value)
+                normalized.update(pile_attributes)
+                continue
             attribute_name = _design_attribute_for_label(label)
             if attribute_name is None or not is_attribute_applicable(furniture_type_code, attribute_name):
                 continue
             value = _normalize_design_attribute_value(attribute_name, raw_value)
             if value is not None:
                 normalized[attribute_name] = value
+    return normalized
+
+
+def _normalize_pile_specification(furniture_type_code: str | None, value: object) -> dict[str, object]:
+    if not isinstance(value, str):
+        return {}
+    match = re.fullmatch(r"(.+?)\s+-\s+([A-Za-z]+)\s*", value.strip())
+    if match is None:
+        return {}
+    measurement = parse_measurement_text(match.group(1).strip())
+    pile_type = match.group(2).casefold()
+    if measurement is None or measurement["unit"] not in {"in", "inch", "inches", "cm", "centimeter", "centimeters"}:
+        return {}
+    if pile_type != "medium":
+        return {}
+    centimeters = Decimal(str(measurement["value"])) * Decimal("2.54") if measurement["unit"] in {"in", "inch", "inches"} else Decimal(str(measurement["value"]))
+    normalized: dict[str, object] = {}
+    if is_attribute_applicable(furniture_type_code, "pile_height"):
+        normalized["pile_height"] = float(centimeters)
+    if is_attribute_applicable(furniture_type_code, "pile_type"):
+        normalized["pile_type"] = pile_type
     return normalized
 
 
@@ -336,6 +363,12 @@ def _design_attribute_for_label(label: object) -> str | None:
         return None
     normalized = label.strip().casefold().rstrip(":").strip()
     return _DESIGN_ATTRIBUTE_LABELS.get(" ".join(normalized.split()))
+
+
+def _is_label(label: object, expected: str) -> bool:
+    if not isinstance(label, str):
+        return False
+    return label.strip().casefold().rstrip(":").strip() == expected
 
 
 def _normalize_design_attribute_value(attribute_name: str, value: object) -> object | None:

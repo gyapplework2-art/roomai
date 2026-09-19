@@ -855,6 +855,60 @@ def test_rug_identity_preserves_existing_normalized_attributes():
     assert variant.variant_attributes["normalized_attributes"] == {"washable": True, "construction": "flatwoven"}
 
 
+def test_article_rug_pile_specification_normalizes_height_and_type_without_mutating_raw_value():
+    raw_value = '1/2" - Medium'
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Texa 8 x 10 Rug - Vanilla Ivory",
+        source_category="Rugs",
+        product_url="https://example.com/article/product/1834/texa-rug",
+        variants=[CatalogVariant(variant_attributes={"article_html_specifications": {"Pile": raw_value}})],
+    )
+    normalized = normalize_product(product).product.variants[0]
+
+    assert normalized.variant_attributes["normalized_attributes"] == {"pile_height": 1.27, "pile_type": "medium"}
+    assert normalized.variant_attributes["article_html_specifications"]["Pile"] == raw_value
+
+
+def test_article_rug_pile_specification_requires_rug_applicability():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Sofa",
+        source_category="Sofas",
+        product_url="https://example.com/sofa",
+        variants=[CatalogVariant(variant_attributes={"article_html_specifications": {"Pile": '1/2" - Medium'}})],
+    )
+    normalized = normalize_product(product).product.variants[0]
+
+    assert "pile_height" not in normalized.variant_attributes["normalized_attributes"]
+    assert "pile_type" not in normalized.variant_attributes["normalized_attributes"]
+
+
+@pytest.mark.parametrize("value", ['Medium', '1/2" - High', '1/2" Medium', 'wool - Medium'])
+def test_malformed_or_unsupported_pile_specifications_remain_unresolved(value: str):
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Rug", source_category="Rugs", product_url="https://example.com/rug",
+        variants=[CatalogVariant(variant_attributes={"article_html_specifications": {"Pile": value}})],
+    )
+    normalized = normalize_product(product).product.variants[0]
+
+    assert "pile_height" not in normalized.variant_attributes["normalized_attributes"]
+    assert "pile_type" not in normalized.variant_attributes["normalized_attributes"]
+
+
+def test_article_core_html_labels_do_not_become_pile_design_attributes():
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Rug", source_category="Rugs", product_url="https://example.com/rug",
+        variants=[CatalogVariant(variant_attributes={
+            "article_html_specifications": {"Color": "Vanilla Ivory", "Materials": "70% wool, 30% viscose", "Style": "Coastal"},
+        })],
+    )
+    normalized = normalize_product(product).product.variants[0]
+
+    assert "pile_height" not in normalized.variant_attributes["normalized_attributes"]
+    assert "pile_type" not in normalized.variant_attributes["normalized_attributes"]
+
+
 def test_mirror_simple_frame_label_uses_generic_frame_material_normalization():
     attributes = {"Frame:": "Aluminum"}
     product = CatalogProduct(
