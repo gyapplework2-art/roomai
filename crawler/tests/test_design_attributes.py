@@ -32,6 +32,7 @@ def test_every_applicable_attribute_is_defined():
         ("assembly_required", "boolean"),
         ("drawer_count", "integer"),
         ("seat_height", "measurement"),
+        ("seat_depth", "measurement"),
         ("pile_height", "measurement"),
         ("bulb_count", "integer"),
         ("dimmable", "boolean"),
@@ -51,6 +52,13 @@ def test_sofa_applicability_includes_upholstery_but_not_lighting():
     assert is_attribute_applicable("sofa", "assembly_required")
     assert not is_attribute_applicable("sofa", "bulb_base")
     assert not is_attribute_applicable("sofa", "dimmable")
+    assert is_attribute_applicable("sofa", "seat_height")
+    assert is_attribute_applicable("sofa", "seat_depth")
+
+
+def test_seat_measurements_are_not_applicable_to_area_rugs():
+    assert not is_attribute_applicable("area_rug", "seat_height")
+    assert not is_attribute_applicable("area_rug", "seat_depth")
 
 
 def test_dining_table_applicability_includes_table_concepts_not_cushion_fill():

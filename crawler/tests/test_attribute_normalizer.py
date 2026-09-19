@@ -855,6 +855,54 @@ def test_rug_identity_preserves_existing_normalized_attributes():
     assert variant.variant_attributes["normalized_attributes"] == {"washable": True, "construction": "flatwoven"}
 
 
+def test_article_sofa_seat_height_and_depth_measurements_normalize_without_mutating_raw_values():
+    raw_attributes = {"Seat Height": '20.5"', "Seat Depth": '24"'}
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Timber Sofa",
+        source_category="Sofas",
+        product_url="https://example.com/article/timber-sofa",
+        variants=[CatalogVariant(variant_attributes={"article_html_specifications": raw_attributes})],
+    )
+    normalized = normalize_product(product).product.variants[0]
+
+    assert normalized.variant_attributes["normalized_attributes"] == {
+        "seat_height": 52.07,
+        "seat_depth": 60.96,
+    }
+    assert normalized.variant_attributes["article_html_specifications"] == raw_attributes
+
+
+@pytest.mark.parametrize("value", ["deep", "24", "24 mm"])
+def test_malformed_or_unsupported_seat_measurements_remain_unresolved(value: str):
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Timber Sofa",
+        source_category="Sofas",
+        product_url="https://example.com/article/timber-sofa",
+        variants=[CatalogVariant(variant_attributes={"article_html_specifications": {"Seat Depth": value}})],
+    )
+    normalized = normalize_product(product).product.variants[0]
+
+    assert "seat_depth" not in normalized.variant_attributes["normalized_attributes"]
+
+
+def test_seat_measurement_labels_do_not_normalize_for_area_rugs():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Area Rug",
+        source_category="Rugs",
+        product_url="https://example.com/rug",
+        variants=[CatalogVariant(variant_attributes={"article_html_specifications": {
+            "Seat Height": '20.5"',
+            "Seat Depth": '24"',
+        }})],
+    )
+    normalized = normalize_product(product).product.variants[0]
+
+    assert normalized.variant_attributes["normalized_attributes"] == {}
+
+
 def test_article_rug_pile_specification_normalizes_height_and_type_without_mutating_raw_value():
     raw_pile = '1" - Shag'
     raw_construction = "Handwoven"

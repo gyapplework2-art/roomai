@@ -36,6 +36,7 @@ _ATTRIBUTE_DEFINITION_ITEMS: tuple[DesignAttributeDefinition, ...] = (
     DesignAttributeDefinition("sleeper", "boolean"),
     DesignAttributeDefinition("removable_cover", "boolean"),
     DesignAttributeDefinition("seat_height", "measurement"),
+    DesignAttributeDefinition("seat_depth", "measurement"),
     DesignAttributeDefinition("arm_type", "string"),
     DesignAttributeDefinition("back_type", "string"),
     DesignAttributeDefinition("swivel", "boolean"),
@@ -83,10 +84,10 @@ ATTRIBUTE_DEFINITIONS: Mapping[str, DesignAttributeDefinition] = MappingProxyTyp
 
 _UPHOLSTERED_SEATING = (
     "upholstery", "frame_material", "cushion_fill", "firmness", "reclining", "sleeper",
-    "removable_cover", "assembly_required", "indoor_outdoor",
+    "removable_cover", "seat_height", "seat_depth", "assembly_required", "indoor_outdoor",
 )
 _CHAIR_SEATING = (
-    "upholstery", "frame_material", "seat_height", "arm_type", "back_type",
+    "upholstery", "frame_material", "seat_height", "seat_depth", "arm_type", "back_type",
     "assembly_required", "indoor_outdoor",
 )
 _STORAGE_CASE_GOODS = (
@@ -107,6 +108,8 @@ _DESIGN_ATTRIBUTE_LABELS = MappingProxyType({
     "cushion fill": "cushion_fill",
     "seat cushion": "cushion_fill",
     "assembly required": "assembly_required",
+    "seat height": "seat_height",
+    "seat depth": "seat_depth",
     "table top": "tabletop_material",
     "top": "tabletop_material",
     "tabletop material": "tabletop_material",
@@ -144,7 +147,7 @@ FURNITURE_TYPE_ATTRIBUTES: Mapping[str, tuple[str, ...]] = MappingProxyType({
     ),
     "dining_chair": (*_CHAIR_SEATING, "footrest"),
     "bar_counter_stool": (
-        "upholstery", "frame_material", "seat_height", "back_type", "swivel",
+        "upholstery", "frame_material", "seat_height", "seat_depth", "back_type", "swivel",
         "adjustable_height", "footrest", "assembly_required", "indoor_outdoor",
     ),
     "bed_frame": (
@@ -154,7 +157,7 @@ FURNITURE_TYPE_ATTRIBUTES: Mapping[str, tuple[str, ...]] = MappingProxyType({
     "nightstand": _STORAGE_CASE_GOODS,
     "dresser": _STORAGE_CASE_GOODS,
     "bench": (
-        "upholstery", "frame_material", "seat_height", "storage_type", "finish",
+        "upholstery", "frame_material", "seat_height", "seat_depth", "storage_type", "finish",
         "assembly_required", "indoor_outdoor",
     ),
     "desk": (
@@ -163,7 +166,7 @@ FURNITURE_TYPE_ATTRIBUTES: Mapping[str, tuple[str, ...]] = MappingProxyType({
         "assembly_required",
     ),
     "office_chair": (
-        "upholstery", "frame_material", "seat_height", "arm_type", "back_type", "swivel",
+        "upholstery", "frame_material", "seat_height", "seat_depth", "arm_type", "back_type", "swivel",
         "adjustable_height", "assembly_required",
     ),
     "bookcase_shelving": (
@@ -384,6 +387,13 @@ def _normalize_design_attribute_value(attribute_name: str, value: object) -> obj
     if attribute_name == "construction":
         normalized = " ".join(value.casefold().split()).replace("-", "")
         return normalized if normalized in {"handwoven", "flatwoven"} else None
+    if attribute_name in {"seat_height", "seat_depth"}:
+        measurement = parse_measurement_text(value.strip())
+        if measurement is None or measurement["unit"] not in {"in", "inch", "inches", "cm", "centimeter", "centimeters"}:
+            return None
+        if measurement["unit"] in {"in", "inch", "inches"}:
+            return float(Decimal(str(measurement["value"])) * Decimal("2.54"))
+        return float(measurement["value"])
     return None
 
 
