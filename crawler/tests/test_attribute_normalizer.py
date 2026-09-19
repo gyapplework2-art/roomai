@@ -565,6 +565,119 @@ def test_identity_attributes_preserve_existing_entries_and_labeled_normalization
     assert normalize_product(with_labeled).product.variants[0].variant_attributes["normalized_attributes"] == {"frame_material": "wood"}
 
 
+def test_observed_ikea_storklinta_identity_drawer_count_ignores_component_materials():
+    attributes = {
+        "Drawer side/ Drawer back": "Particleboard, Plastic foil, Paper foil",
+        "Back panel": "Fiberboard",
+    }
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name='STORKLINTA 6-drawer dresser - white/anchor/unlock function 55 1/8x18 7/8x29 1/2 "',
+        source_category="Dressers & chests of drawers",
+        product_url="https://example.com/products/storklinta-6-drawer-dresser",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"drawer_count": 6}
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
+def test_observed_ikea_brimnes_identity_storage_headboard_ignores_material_labels_and_description_drawers():
+    attributes = {
+        "Frame/ Fixed shelf/ Adjustable shelf/ Partition/ Back/ Top panel/ Side panel": "Particleboard, Paper foil",
+    }
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="BRIMNES Bed frame with storage & headboard - white Queen",
+        source_category="Bed frames with storage",
+        source_description="Four large drawers give you extra storage under the bed.",
+        source_features=["Adjustable shelves", "Large drawers"],
+        product_url="https://example.com/products/brimnes-storage-bed-headboard",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {
+        "bed_size": "queen",
+        "storage_type": "integrated_storage",
+        "headboard": True,
+    }
+    assert "adjustable_shelves" not in variant.variant_attributes["normalized_attributes"]
+    assert "shelf_count" not in variant.variant_attributes["normalized_attributes"]
+    assert "drawer_count" not in variant.variant_attributes["normalized_attributes"]
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
+def test_observed_ikea_mittzon_identity_sit_stand_ignores_cable_management_label_and_description():
+    attributes = {"Cable management/ Cable management:": "Felt"}
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name='MITTZON Desk sit/stand - electric white 47 1/4x23 5/8 "',
+        source_category="MITTZON office desks",
+        source_description="Transition smoothly between sitting and standing during the work day.",
+        source_features=["Cable management"],
+        product_url="https://example.com/products/mittzon-electric-desk",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"sit_stand": True}
+    assert "cable_management" not in variant.variant_attributes["normalized_attributes"]
+    assert "adjustable_height" not in variant.variant_attributes["normalized_attributes"]
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
+def test_observed_article_nera_identity_drawer_count_handles_trailing_category_space():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Nera 6-Drawer Double Dresser - Oak",
+        source_category="Dressers ",
+        source_description="A storage-forward bedroom piece.",
+        product_url="https://example.com/products/nera-6-drawer-double-dresser",
+        variants=[CatalogVariant()],
+    )
+    normalized = normalize_product(product).product
+
+    assert normalized.source_product_name == "Nera 6-Drawer Double Dresser - Oak"
+    assert normalized.variants[0].variant_attributes["normalized_attributes"] == {"drawer_count": 6}
+
+
+def test_observed_article_lenia_bed_size_does_not_use_description_headboard():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Lenia Queen Panel Bed - White Oak",
+        source_category="Beds",
+        source_description="A panel headboard creates a quiet bedroom focal point.",
+        product_url="https://example.com/products/lenia-queen-panel-bed",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"bed_size": "queen"}
+    assert "headboard" not in variant.variant_attributes["normalized_attributes"]
+
+
+def test_observed_article_madera_ordinary_desk_does_not_gain_missing_feature_booleans_or_counts():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name='Madera 54" Desk - Oak',
+        source_category="Desks",
+        source_description="A writing desk with generous workspace.",
+        source_features=["Cable pass-through", "Oak veneer"],
+        product_url="https://example.com/products/madera-54-desk-oak",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+    assert "sit_stand" not in variant.variant_attributes["normalized_attributes"]
+    assert "cable_management" not in variant.variant_attributes["normalized_attributes"]
+    assert "adjustable_height" not in variant.variant_attributes["normalized_attributes"]
+    assert "drawer_count" not in variant.variant_attributes["normalized_attributes"]
+    assert "shelf_count" not in variant.variant_attributes["normalized_attributes"]
+
+
 def test_existing_normalized_attributes_dict_is_preserved_for_future_facts():
     product = CatalogProduct(
         vendor_market_code="US", source_product_name="Sofa", product_url="https://example.com/p",
