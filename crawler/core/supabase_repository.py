@@ -31,6 +31,12 @@ class CatalogRestTransport(Protocol):
     async def resolve_furniture_type(self, furniture_type_code: str) -> RestResponse:
         """Resolve one existing furniture type by canonical code; never create taxonomy."""
 
+    async def get_current_offer(self, variant_id: str) -> RestResponse:
+        """Read the current offer for one resolved variant id."""
+
+    async def append_history(self, table: str, values: dict[str, object]) -> RestResponse:
+        """Append one history row without conflict/upsert semantics."""
+
     async def upsert(self, table: str, values: dict[str, object], conflict_target: str) -> RestResponse:
         """Upsert one row and return its database id."""
 
@@ -65,6 +71,22 @@ class HttpxPostgrestTransport:
                     "select": "id",
                 },
             )
+        return _response(response)
+
+    async def get_current_offer(self, variant_id: str) -> RestResponse:
+        url, _ = self._settings.require_supabase_credentials()
+        async with httpx.AsyncClient(base_url=f"{url}/rest/v1", headers=self._headers()) as client:
+            response = await client.get(
+                "/catalog_current_offers",
+                params={"variant_id": f"eq.{variant_id}", "select": "*"},
+            )
+        return _response(response)
+
+    async def append_history(self, table: str, values: dict[str, object]) -> RestResponse:
+        url, _ = self._settings.require_supabase_credentials()
+        headers = {**self._headers(), "Prefer": "return=representation"}
+        async with httpx.AsyncClient(base_url=f"{url}/rest/v1", headers=headers) as client:
+            response = await client.post(f"/{table}", json=values)
         return _response(response)
 
     async def upsert(self, table: str, values: dict[str, object], conflict_target: str) -> RestResponse:
@@ -264,6 +286,9 @@ class SupabaseCatalogExecutor:
             return
         if self._transport is None:
             return
+        if operation.target_table == "catalog_current_offers":
+            if not await self._record_offer_history(values, report):
+                return
         response = await self._transport.upsert(operation.target_table, values, _CONFLICT_TARGETS[operation.target_table])
         reference = _operation_reference(operation)
         resolved_id = response.data[0].get("id") if response.data else None
@@ -281,6 +306,56 @@ class SupabaseCatalogExecutor:
             if response.hint:
                 error["hint"] = response.hint
             report.failed_operations.append(error)
+
+    async def _record_offer_history(self, values: dict[str, object], report: ExecutionReport) -> bool:
+        if self._transport is None:
+            return False
+        variant_id = values.get("variant_id")
+        if not isinstance(variant_id, str):
+            report.failed_operations.append({
+                "table": "catalog_current_offers",
+                "reason": "resolved_variant_id_missing",
+            })
+            return False
+        existing = await self._transport.get_current_offer(variant_id)
+        if existing.status_code >= 300:
+            self._record_response_failure("catalog_current_offers", existing, report, "current_offer_read_failed")
+            return False
+        previous = existing.data[0] if existing.data else None
+        if previous is None:
+            return True
+        price_fields = ("currency", "vendor_list_price", "vendor_sale_price", "vendor_shipping_fee")
+        availability_fields = ("source_availability", "normalized_availability", "delivery_text")
+        if any(previous.get(field) != values.get(field) for field in price_fields):
+            response = await self._transport.append_history(
+                "catalog_price_history",
+                {"variant_id": variant_id, **{field: values.get(field) for field in price_fields}},
+            )
+            if response.status_code >= 300:
+                self._record_response_failure("catalog_price_history", response, report, "history_insert_failed")
+            else:
+                report.successful_operations.append("catalog_price_history")
+        if any(previous.get(field) != values.get(field) for field in availability_fields):
+            response = await self._transport.append_history(
+                "catalog_availability_history",
+                {"variant_id": variant_id, **{field: values.get(field) for field in availability_fields}},
+            )
+            if response.status_code >= 300:
+                self._record_response_failure("catalog_availability_history", response, report, "history_insert_failed")
+            else:
+                report.successful_operations.append("catalog_availability_history")
+        return True
+
+    @staticmethod
+    def _record_response_failure(table: str, response: RestResponse, report: ExecutionReport, fallback: str) -> None:
+        error = {"table": table, "reason": response.message or fallback}
+        if response.error_code:
+            error["code"] = response.error_code
+        if response.details:
+            error["details"] = response.details
+        if response.hint:
+            error["hint"] = response.hint
+        report.failed_operations.append(error)
 
 
 def _operation_reference(operation: DryRunOperation) -> str | None:

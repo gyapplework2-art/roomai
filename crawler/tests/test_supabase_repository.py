@@ -25,10 +25,14 @@ class FakeTransport:
         missing_country: bool = False,
         missing_furniture_type: bool = False,
         fail_table: str | None = None,
+        existing_offers: dict[str, dict[str, object]] | None = None,
+        fail_current_offer_read: bool = False,
     ):
         self.missing_country = missing_country
         self.missing_furniture_type = missing_furniture_type
         self.fail_table = fail_table
+        self.existing_offers = existing_offers or {}
+        self.fail_current_offer_read = fail_current_offer_read
         self.calls: list[tuple[str, dict[str, object], str]] = []
         self._ids: dict[str, str] = {}
 
@@ -45,6 +49,20 @@ class FakeTransport:
             if self.missing_furniture_type
             else [{"id": f"furniture-type-uuid-{furniture_type_code}"}],
         )
+
+    async def get_current_offer(self, variant_id: str) -> RestResponse:
+        self.calls.append(("catalog_current_offers", {"variant_id": variant_id}, "read"))
+        if self.fail_current_offer_read:
+            return RestResponse(500, [], "current_offer_read_failed")
+        offer = self.existing_offers.get(variant_id)
+        return RestResponse(200, [offer] if offer else [])
+
+    async def append_history(self, table: str, values: dict[str, object]) -> RestResponse:
+        self.calls.append((table, values, "append"))
+        if table == self.fail_table:
+            return RestResponse(500, [], "history_insert_failed")
+        return RestResponse(201, [{"id": f"{table}-history-id"}])
+
     async def upsert(self, table: str, values: dict[str, object], conflict_target: str) -> RestResponse:
         self.calls.append((table, values, conflict_target))
         if table == self.fail_table:
@@ -299,6 +317,119 @@ def test_required_offer_and_image_values_use_schema_compatible_defaults():
 
     assert missing_variant.offer is not None
     assert missing_variant.offer["normalized_availability"] == "unknown"
+
+
+def test_first_offer_has_no_history_and_still_upserts_current_offer():
+    transport = FakeTransport()
+    report = run(SupabaseCatalogExecutor(transport, settings=settings(True), write_enabled=True).execute(plan("ikea"), execution_requested=True))
+
+    tables = [table for table, _, _ in transport.calls]
+    assert report.write_succeeded
+    assert "catalog_current_offers" in tables
+    assert "catalog_price_history" not in tables
+    assert "catalog_availability_history" not in tables
+
+
+def test_identical_offer_refresh_has_no_history():
+    transport = FakeTransport()
+    executor = SupabaseCatalogExecutor(transport, settings=settings(True), write_enabled=True)
+    first = run(executor.execute(plan("ikea"), execution_requested=True))
+    variant_id = next(value for key, value in first.resolved_identifiers.items() if key.startswith("variant:"))
+    transport.existing_offers[variant_id] = {
+        "variant_id": variant_id,
+        "currency": "USD", "vendor_list_price": None, "vendor_sale_price": 1199.0,
+        "vendor_shipping_fee": None, "source_availability": "https://schema.org/InStock",
+        "normalized_availability": "in_stock", "delivery_text": "US",
+    }
+    start = len(transport.calls)
+    second = run(executor.execute(plan("ikea"), execution_requested=True))
+
+    assert second.write_succeeded
+    assert [table for table, _, _ in transport.calls[start:] if table.endswith("history")] == []
+    assert any(table == "catalog_current_offers" and mode != "read" for table, _, mode in transport.calls[start:])
+
+
+def test_price_change_appends_one_price_history_row():
+    transport = FakeTransport()
+    executor = SupabaseCatalogExecutor(transport, settings=settings(True), write_enabled=True)
+    first = run(executor.execute(plan("ikea"), execution_requested=True))
+    variant_id = next(value for key, value in first.resolved_identifiers.items() if key.startswith("variant:"))
+    transport.existing_offers[variant_id] = {
+        "variant_id": variant_id, "currency": "USD", "vendor_list_price": 1000.0,
+        "vendor_sale_price": 1000.0, "vendor_shipping_fee": None,
+        "source_availability": "https://schema.org/InStock", "normalized_availability": "in_stock", "delivery_text": "US",
+    }
+    start = len(transport.calls)
+    second = run(executor.execute(plan("ikea"), execution_requested=True))
+    appended = [(table, values) for table, values, mode in transport.calls[start:] if mode == "append"]
+
+    assert second.write_succeeded
+    assert [table for table, _ in appended] == ["catalog_price_history"]
+    assert appended[0][1]["variant_id"] == variant_id
+    assert appended[0][1]["vendor_sale_price"] == 1199.0
+
+
+def test_availability_change_appends_one_availability_history_row():
+    transport = FakeTransport()
+    executor = SupabaseCatalogExecutor(transport, settings=settings(True), write_enabled=True)
+    first = run(executor.execute(plan("ikea"), execution_requested=True))
+    variant_id = next(value for key, value in first.resolved_identifiers.items() if key.startswith("variant:"))
+    transport.existing_offers[variant_id] = {
+        "variant_id": variant_id, "currency": "USD", "vendor_list_price": None,
+        "vendor_sale_price": 1199.0, "vendor_shipping_fee": None,
+        "source_availability": "https://schema.org/OutOfStock", "normalized_availability": "out_of_stock", "delivery_text": "US",
+    }
+    start = len(transport.calls)
+    second = run(executor.execute(plan("ikea"), execution_requested=True))
+    appended = [(table, values) for table, values, mode in transport.calls[start:] if mode == "append"]
+
+    assert second.write_succeeded
+    assert [table for table, _ in appended] == ["catalog_availability_history"]
+    assert appended[0][1]["normalized_availability"] == "in_stock"
+
+
+def test_simultaneous_price_and_availability_changes_append_one_row_each():
+    transport = FakeTransport()
+    executor = SupabaseCatalogExecutor(transport, settings=settings(True), write_enabled=True)
+    first = run(executor.execute(plan("ikea"), execution_requested=True))
+    variant_id = next(value for key, value in first.resolved_identifiers.items() if key.startswith("variant:"))
+    transport.existing_offers[variant_id] = {
+        "variant_id": variant_id, "currency": "CAD", "vendor_list_price": 1.0,
+        "vendor_sale_price": 1.0, "vendor_shipping_fee": 1.0,
+        "source_availability": "old", "normalized_availability": "out_of_stock", "delivery_text": "old",
+    }
+    start = len(transport.calls)
+    second = run(executor.execute(plan("ikea"), execution_requested=True))
+    appended_tables = [table for table, _, mode in transport.calls[start:] if mode == "append"]
+
+    assert second.write_succeeded
+    assert appended_tables == ["catalog_price_history", "catalog_availability_history"]
+    assert any(table == "catalog_current_offers" and mode != "read" for table, _, mode in transport.calls[start:])
+
+
+def test_failed_current_offer_read_is_reported_and_current_offer_is_not_upserted():
+    transport = FakeTransport(fail_current_offer_read=True)
+    report = run(SupabaseCatalogExecutor(transport, settings=settings(True), write_enabled=True).execute(plan("ikea"), execution_requested=True))
+
+    assert any(item["reason"] == "current_offer_read_failed" for item in report.failed_operations)
+    assert not any(table == "catalog_current_offers" and mode != "read" for table, _, mode in transport.calls)
+
+
+def test_failed_history_insert_is_reported_but_current_offer_still_upserts():
+    transport = FakeTransport(fail_table="catalog_price_history")
+    executor = SupabaseCatalogExecutor(transport, settings=settings(True), write_enabled=True)
+    first = run(executor.execute(plan("ikea"), execution_requested=True))
+    variant_id = next(value for key, value in first.resolved_identifiers.items() if key.startswith("variant:"))
+    transport.existing_offers[variant_id] = {
+        "variant_id": variant_id, "currency": "USD", "vendor_list_price": 1.0,
+        "vendor_sale_price": 1.0, "vendor_shipping_fee": None,
+        "source_availability": "https://schema.org/InStock", "normalized_availability": "in_stock", "delivery_text": "US",
+    }
+    start = len(transport.calls)
+    report = run(executor.execute(plan("ikea"), execution_requested=True))
+
+    assert any(item["table"] == "catalog_price_history" for item in report.failed_operations)
+    assert any(table == "catalog_current_offers" and mode != "read" for table, _, mode in transport.calls[start:])
 
 
 def test_postgrest_errors_preserve_safe_database_diagnostics_without_secret():
