@@ -451,6 +451,120 @@ def test_table_component_materials_require_applicable_furniture_type():
     assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
 
 
+@pytest.mark.parametrize("name", ["STORKLINTA 6-Drawer Dresser", "STORKLINTA 6 Drawer Dresser"])
+def test_dresser_identity_drawer_count_requires_explicit_drawer_wording(name: str):
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name=name, source_category="Dressers", product_url="https://example.com/p",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"drawer_count": 6}
+    assert normalize_product(product).product.source_product_name == name
+
+
+def test_dresser_identity_does_not_extract_unrelated_numbers_or_inapplicable_types():
+    unrelated_number = CatalogProduct(
+        vendor_market_code="US", source_product_name="STORKLINTA 6 wide dresser", source_category="Dressers", product_url="https://example.com/p",
+        variants=[CatalogVariant()],
+    )
+    inapplicable = CatalogProduct(
+        vendor_market_code="US", source_product_name="STORKLINTA 6-Drawer Dresser", source_category="Sofas", product_url="https://example.com/p",
+        variants=[CatalogVariant()],
+    )
+
+    assert normalize_product(unrelated_number).product.variants[0].variant_attributes["normalized_attributes"] == {}
+    assert normalize_product(inapplicable).product.variants[0].variant_attributes["normalized_attributes"] == {}
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("BRIMNES Queen bed frame", {"bed_size": "queen"}),
+        ("BRIMNES Twin XL bed frame", {"bed_size": "twin_xl"}),
+        ("BRIMNES California King bed frame", {"bed_size": "california_king"}),
+        ("BRIMNES Queen bed frame with storage", {"bed_size": "queen", "storage_type": "integrated_storage"}),
+        ("BRIMNES Queen bed frame with headboard", {"bed_size": "queen", "headboard": True}),
+        ("BRIMNES Queen bed frame with storage and headboard", {"bed_size": "queen", "storage_type": "integrated_storage", "headboard": True}),
+    ],
+)
+def test_bed_frame_identity_attributes_from_explicit_product_name(name: str, expected: dict[str, object]):
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name=name, source_category="Beds", product_url="https://example.com/p",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == expected
+    assert "headboard" not in normalize_product(CatalogProduct(
+        vendor_market_code="US", source_product_name="BRIMNES Queen bed frame", source_category="Beds", product_url="https://example.com/p",
+        variants=[CatalogVariant()],
+    )).product.variants[0].variant_attributes["normalized_attributes"]
+
+
+@pytest.mark.parametrize("name", ["MITTZON Desk sit/stand", "MITTZON Sit-stand desk", "MITTZON Sit stand desk"])
+def test_desk_identity_sit_stand_from_explicit_product_name(name: str):
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name=name, source_category="Desks", product_url="https://example.com/p",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"sit_stand": True}
+
+
+def test_ordinary_desk_and_cable_management_label_do_not_create_sit_stand_or_cable_management():
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="MITTZON Desk", source_category="Desks", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": {"Cable management": "Felt"}})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+    assert variant.variant_attributes["ikea_labeled_attributes"] == {"Cable management": "Felt"}
+
+
+def test_identity_attributes_ignore_descriptions_features_and_urls():
+    products = (
+        CatalogProduct(
+            vendor_market_code="US", source_product_name="STORKLINTA Dresser", source_category="Dressers",
+            source_description="6 drawers", product_url="https://example.com/p", variants=[CatalogVariant()],
+        ),
+        CatalogProduct(
+            vendor_market_code="US", source_product_name="BRIMNES Bed frame", source_category="Beds",
+            source_description="Queen with storage and headboard", product_url="https://example.com/p", variants=[CatalogVariant()],
+        ),
+        CatalogProduct(
+            vendor_market_code="US", source_product_name="MITTZON Desk", source_category="Desks",
+            source_description="sit stand", product_url="https://example.com/p", variants=[CatalogVariant()],
+        ),
+        CatalogProduct(
+            vendor_market_code="US", source_product_name="BRIMNES Bed frame", source_category="Beds",
+            source_features=["Queen", "with storage", "with headboard"], product_url="https://example.com/p", variants=[CatalogVariant()],
+        ),
+        CatalogProduct(
+            vendor_market_code="US", source_product_name="BRIMNES Bed frame", source_category="Beds",
+            product_url="https://example.com/queen-bed-frame-with-storage-headboard", variants=[CatalogVariant()],
+        ),
+    )
+
+    assert all(normalize_product(product).product.variants[0].variant_attributes["normalized_attributes"] == {} for product in products)
+
+
+def test_identity_attributes_preserve_existing_entries_and_labeled_normalization_still_works():
+    with_existing = CatalogProduct(
+        vendor_market_code="US", source_product_name="STORKLINTA 6 Drawer Dresser", source_category="Dressers", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={"normalized_attributes": {"washable": True}})],
+    )
+    with_labeled = CatalogProduct(
+        vendor_market_code="US", source_product_name="Sofa", source_category="Sofas", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={"article_attributes": {"Frame Material": "Solid wood"}})],
+    )
+
+    assert normalize_product(with_existing).product.variants[0].variant_attributes["normalized_attributes"] == {"washable": True, "drawer_count": 6}
+    assert normalize_product(with_labeled).product.variants[0].variant_attributes["normalized_attributes"] == {"frame_material": "wood"}
+
+
 def test_existing_normalized_attributes_dict_is_preserved_for_future_facts():
     product = CatalogProduct(
         vendor_market_code="US", source_product_name="Sofa", product_url="https://example.com/p",

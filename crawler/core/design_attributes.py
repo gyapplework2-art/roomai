@@ -5,6 +5,7 @@ It never implies that a product has those attributes.
 """
 
 from dataclasses import dataclass
+import re
 from types import MappingProxyType
 from typing import Literal, Mapping
 
@@ -241,6 +242,71 @@ def normalized_labeled_design_attributes(
             if value is not None:
                 normalized[attribute_name] = value
     return normalized
+
+
+def normalized_identity_design_attributes(
+    furniture_type_code: str | None,
+    source_product_name: str | None,
+) -> dict[str, object]:
+    """Normalize narrow product-identity design facts from explicit product names only."""
+    if not source_product_name:
+        return {}
+
+    normalized_name = _normalized_identity_text(source_product_name)
+    attributes: dict[str, object] = {}
+    if furniture_type_code == "dresser":
+        drawer_count = _identity_drawer_count(normalized_name)
+        if drawer_count is not None and is_attribute_applicable(furniture_type_code, "drawer_count"):
+            attributes["drawer_count"] = drawer_count
+    if furniture_type_code == "bed_frame":
+        bed_size = _identity_bed_size(normalized_name)
+        if bed_size is not None and is_attribute_applicable(furniture_type_code, "bed_size"):
+            attributes["bed_size"] = bed_size
+        if "with storage" in normalized_name and is_attribute_applicable(furniture_type_code, "storage_type"):
+            attributes["storage_type"] = "integrated_storage"
+        if _identity_has_headboard(normalized_name) and is_attribute_applicable(furniture_type_code, "headboard"):
+            attributes["headboard"] = True
+    if furniture_type_code == "desk" and _identity_is_sit_stand_desk(normalized_name) and is_attribute_applicable(furniture_type_code, "sit_stand"):
+        attributes["sit_stand"] = True
+    return attributes
+
+
+def _normalized_identity_text(value: str) -> str:
+    normalized = value.casefold().replace("/", " ").replace("-", " ")
+    return " ".join(re.sub(r"[^a-z0-9\s]", " ", normalized).split())
+
+
+def _identity_drawer_count(normalized_name: str) -> int | None:
+    match = re.search(r"\b([1-9][0-9]*)\s+drawers?\b", normalized_name)
+    return int(match.group(1)) if match else None
+
+
+def _identity_bed_size(normalized_name: str) -> str | None:
+    for phrase, value in (
+        ("california king", "california_king"),
+        ("twin xl", "twin_xl"),
+        ("queen", "queen"),
+        ("king", "king"),
+        ("twin", "twin"),
+        ("full", "full"),
+    ):
+        if re.search(rf"\b{re.escape(phrase)}\b", normalized_name):
+            return value
+    return None
+
+
+def _identity_has_headboard(normalized_name: str) -> bool:
+    return re.search(r"\bwith\b(?:\s+[a-z0-9]+){0,4}\s+headboard\b", normalized_name) is not None
+
+
+def _identity_is_sit_stand_desk(normalized_name: str) -> bool:
+    return any(
+        re.search(pattern, normalized_name) is not None
+        for pattern in (
+            r"\bdesk sit stand\b",
+            r"\bsit stand desk\b",
+        )
+    )
 
 
 def _design_attribute_for_label(label: object) -> str | None:
