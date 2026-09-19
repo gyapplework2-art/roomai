@@ -275,6 +275,8 @@ def normalized_identity_design_attributes(
         bulb_count = _identity_bulb_count(normalized_name)
         if bulb_count is not None and is_attribute_applicable(furniture_type_code, "bulb_count"):
             attributes["bulb_count"] = bulb_count
+    if furniture_type_code == "area_rug" and _identity_is_flatwoven_rug(normalized_name) and is_attribute_applicable(furniture_type_code, "construction"):
+        attributes["construction"] = "flatwoven"
     return attributes
 
 
@@ -323,6 +325,10 @@ def _identity_is_dimmable_lighting(normalized_name: str) -> bool:
 def _identity_bulb_count(normalized_name: str) -> int | None:
     match = re.search(r"\bwith\s+([1-9][0-9]*)\s+lights\b", normalized_name)
     return int(match.group(1)) if match else None
+
+
+def _identity_is_flatwoven_rug(normalized_name: str) -> bool:
+    return re.search(r"\bflatwoven\b", normalized_name) is not None or re.search(r"\bflat\s+woven\b", normalized_name) is not None
 
 
 def _design_attribute_for_label(label: object) -> str | None:

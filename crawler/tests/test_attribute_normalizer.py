@@ -777,6 +777,84 @@ def test_shade_label_requires_applicable_lighting_furniture_type():
     assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
 
 
+def test_observed_tiphede_rug_flatwoven_identity_sets_construction_only():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name='TIPHEDE Rug, flatwoven - natural/black 7 \' 3 "x9 \' 2 "',
+        source_category="Medium, large and extra-large rugs",
+        source_description="A flat-woven cotton rug that is machine washable.",
+        source_features=["machine wash", "cotton"],
+        product_url="https://example.com/products/tiphede-rug-flatwoven-washable",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"construction": "flatwoven"}
+    assert "washable" not in variant.variant_attributes["normalized_attributes"]
+    assert "indoor_outdoor" not in variant.variant_attributes["normalized_attributes"]
+    assert "pile_type" not in variant.variant_attributes["normalized_attributes"]
+
+
+def test_hyphenated_flat_woven_rug_identity_sets_construction():
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Flat-woven Rug", source_category="Rugs", product_url="https://example.com/p",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"construction": "flatwoven"}
+
+
+def test_observed_texa_rug_description_only_construction_and_pile_are_ignored():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Texa 8 x 10 Rug - Vanilla Ivory",
+        source_category="Rugs",
+        source_description="A hand-woven wool rug with a tightly looped surface.",
+        product_url="https://example.com/products/texa-8-x-10-rug",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+    assert "construction" not in variant.variant_attributes["normalized_attributes"]
+    assert "pile_type" not in variant.variant_attributes["normalized_attributes"]
+
+
+def test_rug_description_only_flat_woven_and_washable_are_ignored():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="TIPHEDE Rug",
+        source_category="Rugs",
+        source_description="This flat-woven rug is machine washable.",
+        product_url="https://example.com/products/tiphede-rug-flatwoven-washable",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+
+
+def test_flatwoven_identity_requires_area_rug_applicability():
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Flatwoven Sofa", source_category="Sofas", product_url="https://example.com/p",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+
+
+def test_rug_identity_preserves_existing_normalized_attributes():
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Flatwoven Rug", source_category="Rugs", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={"normalized_attributes": {"washable": True}})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"washable": True, "construction": "flatwoven"}
+
+
 def test_existing_normalized_attributes_dict_is_preserved_for_future_facts():
     product = CatalogProduct(
         vendor_market_code="US", source_product_name="Sofa", product_url="https://example.com/p",
