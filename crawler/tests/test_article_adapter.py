@@ -90,14 +90,18 @@ def test_article_html_specifications_preserve_explicit_material_without_prose_in
     product = parse_fixture("html_specifications_rug.html")
     variant = product.variants[0]
 
-    assert variant.source_material == "70% wool, 30% viscose"
+    assert variant.source_material is None
     assert variant.variant_attributes["article_html_specifications"] == {
         "Materials": "70% wool, 30% viscose",
     }
     assert product.source_payload["article_html_specifications"] == {
         "Materials": "70% wool, 30% viscose",
     }
-    assert "construction" not in normalize_product(product).product.variants[0].variant_attributes["normalized_attributes"]
+    normalized_variant = normalize_product(product).product.variants[0]
+    assert normalized_variant.source_material == "70% wool, 30% viscose"
+    assert normalized_variant.normalized_material is None
+    assert normalized_variant.variant_attributes["attribute_evidence"]["material"][0]["source"] == "labeled_html"
+    assert "construction" not in normalized_variant.variant_attributes["normalized_attributes"]
     assert "Not a specification" not in str(variant.variant_attributes["article_html_specifications"])
 
 
@@ -131,6 +135,36 @@ def test_article_specs_parser_does_not_collect_unrelated_div_pairs():
     assert product.source_payload["article_html_specifications"] == {
         "Materials": "70% wool, 30% viscose",
     }
+
+
+def test_article_html_color_and_style_join_generic_labeled_evidence_pipeline():
+    html = '''
+    <script type="application/ld+json">{"@type":"Product","name":"Coastal Rug","sku":"HTML-STYLE-1","url":"https://example.com/article/html-style-1","category":"Rugs"}</script>
+    <div class="flex-grid specs-rows"><div class="specs-title">Color</div><div class="specs-value">Vanilla Ivory</div></div>
+    <div class="flex-grid specs-rows"><div class="specs-title">Style</div><div class="specs-value">Coastal</div></div>
+    '''
+    product = ArticleVendorAdapter().parse_product(html, "https://example.com/article/html-style-1")
+    normalized = normalize_product(product).product.variants[0]
+
+    assert normalized.normalized_color == "ivory"
+    assert normalized.normalized_style == "coastal"
+    assert [item["source"] for item in normalized.variant_attributes["attribute_evidence"]["color"]] == ["labeled_html"]
+    assert [item["source"] for item in normalized.variant_attributes["attribute_evidence"]["style"]] == ["labeled_html"]
+
+
+def test_structured_article_material_beats_conflicting_html_specification():
+    html = '''
+    <script type="application/ld+json">{"@type":"Product","name":"Structured Sofa","sku":"HTML-PRECEDENCE-1","url":"https://example.com/article/html-precedence-1","material":"Leather"}</script>
+    <div class="flex-grid specs-rows"><div class="specs-title">Materials</div><div class="specs-value">Velvet</div></div>
+    '''
+    product = ArticleVendorAdapter().parse_product(html, "https://example.com/article/html-precedence-1")
+    normalized = normalize_product(product)
+    variant = normalized.product.variants[0]
+
+    assert variant.source_material == "Leather"
+    assert variant.normalized_material == "leather"
+    assert "attribute_conflict:material" in normalized.review_reasons
+    assert [item["source"] for item in variant.variant_attributes["attribute_evidence"]["material"]] == ["structured_data", "labeled_html"]
 
 
 def test_explicit_gallery_images_are_deduplicated_filtered_and_keep_source_order():

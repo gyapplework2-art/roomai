@@ -28,8 +28,6 @@ _MATERIAL_ATTRIBUTE_NAMES = frozenset({"material", "upholstery", "upholstery mat
 _NON_PRODUCT_IMAGE_ROLES = frozenset({"logo", "recommendation", "thumbnail"})
 _URL_MATERIAL_TOKENS = {"leather", "fabric", "velvet"}
 _URL_COLOR_PHRASES = {("charme", "tan"), ("cloud", "gray"), ("rain", "cloud", "gray")}
-_ARTICLE_HTML_COLOR_LABELS = _COLOR_ATTRIBUTE_NAMES
-_ARTICLE_HTML_MATERIAL_LABELS = _MATERIAL_ATTRIBUTE_NAMES | {"materials"}
 
 
 class ArticleExtractionError(ValueError):
@@ -210,20 +208,6 @@ def _attribute_values(state: dict[str, object] | None) -> tuple[str | None, str 
     return color, material, preserved
 
 
-def _html_attribute_values(specifications: dict[str, object]) -> tuple[str | None, str | None]:
-    color = None
-    material = None
-    for label, value in specifications.items():
-        if not isinstance(label, str) or not isinstance(value, str):
-            continue
-        normalized_label = label.strip().casefold().rstrip(":").strip()
-        if normalized_label in _ARTICLE_HTML_COLOR_LABELS and color is None:
-            color = value
-        if normalized_label in _ARTICLE_HTML_MATERIAL_LABELS and material is None:
-            material = value
-    return color, material
-
-
 def _article_page_id(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -382,13 +366,12 @@ def _variant(
     html_specifications: dict[str, object] | None = None,
 ) -> CatalogVariant:
     state_color, state_material, state_attributes = _attribute_values(state)
-    html_color, html_material = _html_attribute_values(html_specifications or {})
     return CatalogVariant(
         vendor_sku=_text(node.get("sku")),
         vendor_variant_id=_text(node.get("@id") or node.get("productID")),
         variant_name=_text(node.get("name")),
-        source_color=_text(node.get("color")) or state_color or html_color,
-        source_material=_text(node.get("material")) or state_material or html_material,
+        source_color=_text(node.get("color")) or state_color,
+        source_material=_text(node.get("material")) or state_material,
         configuration=_text(node.get("model") or node.get("additionalType")),
         seating_capacity=_integer(node.get("seatingCapacity")),
         variant_attributes={

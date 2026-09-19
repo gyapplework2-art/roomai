@@ -8,7 +8,7 @@ AttributeConcept = Literal["color", "material", "style"]
 _PRIORITY = {"official_api": 1, "structured_data": 2, "labeled_html": 3, "vendor_url_slug": 4}
 _LABEL_CONCEPTS = {
     "color": "color", "colour": "color", "finish": "color", "fabric color": "color", "leather color": "color",
-    "material": "material", "upholstery": "material", "upholstery material": "material", "fabric": "material", "leather": "material",
+    "material": "material", "materials": "material", "upholstery": "material", "upholstery material": "material", "fabric": "material", "leather": "material",
     "style": "style", "design style": "style", "furniture style": "style", "product style": "style",
 }
 
@@ -54,12 +54,12 @@ def variant_attribute_candidates(
         candidates["material"].append(AttributeCandidate("material", source_material, "structured_data", _PRIORITY["structured_data"]))
     if source_style:
         candidates["style"].append(AttributeCandidate("style", source_style, "structured_data", _PRIORITY["structured_data"]))
-    for collection_key in ("article_attributes", "ikea_labeled_attributes"):
+    for collection_key in ("article_attributes", "ikea_labeled_attributes", "article_html_specifications"):
         collection = attributes.get(collection_key)
         if not isinstance(collection, dict):
             continue
         for label, value in collection.items():
-            concept = _LABEL_CONCEPTS.get(label.strip().lower()) if isinstance(label, str) else None
+            concept = _LABEL_CONCEPTS.get(label.strip().casefold().rstrip(":").strip()) if isinstance(label, str) else None
             if concept and isinstance(value, str) and value.strip():
                 candidates[concept].append(AttributeCandidate(concept, value, "labeled_html", _PRIORITY["labeled_html"]))
     for concept in ("color", "material"):
