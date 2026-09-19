@@ -45,6 +45,7 @@ def test_observed_storage_bed_and_desk_category_aliases():
 
 def test_unknown_vendor_category_is_not_guessed():
     assert ALIASES.get("mystery relaxation furniture") is None
+    assert ALIASES.get("lighting") is None
 
 def _product(
     *,
@@ -117,6 +118,40 @@ def test_similar_unsupported_storage_category_remains_unresolved():
     assert result.product.canonical_furniture_type_code is None
     assert result.product.needs_taxonomy_review is True
     assert "taxonomy_review" in result.review_reasons
+
+
+def test_observed_rug_and_mirror_categories_resolve_exactly():
+    examples = (
+        ("Medium, large and extra-large rugs", "area_rug"),
+        ("Large mirrors", "mirror"),
+        ("Rugs", "area_rug"),
+    )
+
+    for category, expected_code in examples:
+        result = normalize_product(_product(name="Observed category product", category=category))
+        assert result.product.canonical_furniture_type_code == expected_code
+        assert result.product.needs_taxonomy_review is False
+        assert "taxonomy_review" not in result.review_reasons
+
+
+def test_lighting_category_uses_explicit_product_name_identity_only():
+    pendant = normalize_product(_product(name="Fila Pendant Lamp - Gray", category="Lighting"))
+    floor = normalize_product(_product(name="Aria Floor Lamp", category="Lighting"))
+    table = normalize_product(_product(name="Nara Table Lamp", category="Lighting"))
+    broad = normalize_product(_product(name="Fila Gray Fixture", category="Lighting"))
+
+    assert pendant.product.canonical_furniture_type_code == "pendant_chandelier"
+    assert floor.product.canonical_furniture_type_code == "floor_lamp"
+    assert table.product.canonical_furniture_type_code == "table_lamp"
+    assert broad.product.canonical_furniture_type_code is None
+    assert broad.product.needs_taxonomy_review is True
+
+
+def test_sofa_with_chaise_refinement_still_overrides_broad_sofa_category():
+    result = normalize_product(_product(name="Four seat sofa with chaise", category="Sofas"))
+
+    assert result.product.canonical_furniture_type_code == "sofa_with_chaise"
+    assert result.product.needs_taxonomy_review is False
 
 
 def test_unknown_taxonomy_remains_unresolved_and_requires_review():
