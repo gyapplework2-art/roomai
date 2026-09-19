@@ -43,12 +43,14 @@ def test_one_url_inspection_reuses_ikea_adapter_and_normalizer_without_persisten
 
 
 def test_report_preserves_source_and_normalized_facts_separately_with_image_metadata():
-    product = IkeaVendorAdapter().parse_product(FIXTURE.read_text())
+    product = IkeaVendorAdapter().parse_product(FIXTURE.read_text()).model_copy(update={"source_category": "Sofas"})
     report = build_validation_report(product, normalized=True)
     variant = report["variants"][0]
 
     assert variant["attributes"]["source_color"] == "white"
     assert variant["attributes"]["normalized_color"] == "white"
+    assert report["identity"]["canonical_furniture_type_code"] == "sofa"
+    assert variant["attributes"]["normalized_attributes"] == {"cushion_fill": "pocket_springs_and_foam"}
     assert variant["media"]["images"][0]["width_px"] == 2000
     assert variant["media"]["image_count"] == 2
     assert "customer_price" not in str(report)
@@ -65,3 +67,11 @@ def test_missing_optional_facts_are_safe_and_completeness_is_reported():
     assert report["completeness"]["dimensions"] == "missing"
     assert report["completeness"]["price"] == "missing"
     assert report["completeness"]["fields_missing"] == 6
+
+
+def test_source_only_report_does_not_claim_normalized_furniture_type():
+    product = IkeaVendorAdapter().parse_product(FIXTURE.read_text()).model_copy(update={"source_category": "Sofas"})
+    report = build_validation_report(product, normalized=False)
+
+    assert report["identity"]["canonical_furniture_type_code"] is None
+    assert report["variants"][0]["attributes"]["normalized_attributes"] == {}

@@ -679,7 +679,7 @@ def test_observed_article_madera_ordinary_desk_does_not_gain_missing_feature_boo
 
 
 def test_observed_table_lamp_shade_glass_and_dimmable_identity_are_normalized():
-    attributes = {"Base:": "Steel, Powder coating", "Shade": "Glass"}
+    attributes = {"Base:": "Steel, Powder coating", "Shade:": "Glass"}
     product = CatalogProduct(
         vendor_market_code="US",
         source_product_name='TÄRNABY Table lamp - dimmable beige 10 "',
@@ -695,7 +695,7 @@ def test_observed_table_lamp_shade_glass_and_dimmable_identity_are_normalized():
 
 
 def test_observed_pendant_lamp_bulb_count_and_shade_material_ignore_description_only_facts():
-    attributes = {"Shade": "Glass", "Lamp house:": "Steel"}
+    attributes = {"Shade:": "Glass", "Lamp house:": "Steel"}
     product = CatalogProduct(
         vendor_market_code="US",
         source_product_name='KRANSALG Pendant lamp with 5 lights - black 44 "',
@@ -717,7 +717,7 @@ def test_observed_pendant_lamp_bulb_count_and_shade_material_ignore_description_
 
 def test_observed_floor_lamp_polyester_shade_is_preserved_but_unresolved_conservatively():
     attributes = {
-        "Shade": "100% polyester (min. 90% recycled)",
+        "Shade:": "100% polyester (min. 90% recycled)",
         "Upper tube/ Lower tube/ Base:": "Solid ash, Acrylic stain",
     }
     product = CatalogProduct(
@@ -766,7 +766,7 @@ def test_lighting_description_only_facts_do_not_create_normalized_attributes():
 
 
 def test_shade_label_requires_applicable_lighting_furniture_type():
-    attributes = {"Shade": "Glass"}
+    attributes = {"Shade:": "Glass"}
     product = CatalogProduct(
         vendor_market_code="US", source_product_name="Sofa", source_category="Sofas", product_url="https://example.com/p",
         variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
@@ -856,7 +856,7 @@ def test_rug_identity_preserves_existing_normalized_attributes():
 
 
 def test_mirror_simple_frame_label_uses_generic_frame_material_normalization():
-    attributes = {"Frame": "Aluminum"}
+    attributes = {"Frame:": "Aluminum"}
     product = CatalogProduct(
         vendor_market_code="US",
         source_product_name="Simple Mirror",
@@ -867,6 +867,24 @@ def test_mirror_simple_frame_label_uses_generic_frame_material_normalization():
     variant = normalize_product(product).product.variants[0]
 
     assert variant.variant_attributes["normalized_attributes"] == {"frame_material": "aluminum"}
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
+def test_terminal_colons_are_removed_from_labels_without_changing_raw_evidence():
+    attributes = {"Table top:::": "Oak", "Base material::": "Steel"}
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Simple Dining Table",
+        source_category="Dining Tables",
+        product_url="https://example.com/products/simple-dining-table",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {
+        "tabletop_material": "oak",
+        "base_material": "steel",
+    }
     assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
 
 
@@ -896,7 +914,7 @@ def test_hovet_like_mirror_composite_frame_and_mirror_glass_remain_unresolved():
 
 
 def test_mirror_frame_material_requires_applicable_furniture_type():
-    attributes = {"Frame": "Aluminum"}
+    attributes = {"Frame:": "Aluminum"}
     product = CatalogProduct(
         vendor_market_code="US",
         source_product_name="Simple Rug",

@@ -11,6 +11,7 @@ import json
 
 from crawler.core.fetcher import HttpFetcher
 from crawler.core.normalizer import normalize_product
+from crawler.models.product import CatalogProduct
 from crawler.vendors.article import ArticleVendorAdapter
 
 
@@ -25,65 +26,56 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _print_dimensions(label: str, product) -> None:
-    print(label)
-    for index, variant in enumerate(product.variants, start=1):
-        dimensions = variant.dimensions
-        if dimensions is None:
-            continue
-        if len(product.variants) > 1:
-            print(f"Variant {index}")
-        if label == "SOURCE DIMENSIONS":
-            for name in ("width", "depth", "height", "weight"):
-                detail = dimensions.dimension_details.get(name)
-                if isinstance(detail, dict) and "value" in detail and "unit" in detail:
-                    print(f"{name}: {detail['value']} {detail['unit']}")
-            if not dimensions.dimension_details and dimensions.source_dimension_text:
-                print(dimensions.source_dimension_text)
-        else:
-            for name in ("width_cm", "depth_cm", "height_cm", "weight_kg"):
-                value = getattr(dimensions, name)
-                if value is not None:
-                    print(f"{name}: {value}")
+def _variant_report(source_variant, normalized_variant) -> dict[str, object]:
+    source_dimensions = source_variant.dimensions
+    normalized_dimensions = normalized_variant.dimensions
+    return {
+        "attributes": {
+            "source_color": source_variant.source_color,
+            "normalized_color": normalized_variant.normalized_color,
+            "source_material": source_variant.source_material,
+            "normalized_material": normalized_variant.normalized_material,
+            "normalized_style": normalized_variant.normalized_style,
+            "normalized_attributes": normalized_variant.variant_attributes.get("normalized_attributes", {}),
+            "article_attributes": source_variant.variant_attributes.get("article_attributes", {}),
+            "attribute_evidence": normalized_variant.variant_attributes.get("attribute_evidence", {}),
+        },
+        "dimensions": {
+            "source_dimension_text": source_dimensions.source_dimension_text if source_dimensions else None,
+            "source_dimension_details": source_dimensions.dimension_details if source_dimensions else {},
+            "normalized": normalized_dimensions.model_dump(mode="json") if normalized_dimensions else None,
+        },
+        "media": {
+            "image_count": len(source_variant.images),
+            "images": [image.model_dump(mode="json") for image in source_variant.images],
+        },
+    }
 
 
-def _print_rich_attributes(source_product, normalized_product) -> None:
-    print("RICH ATTRIBUTES")
-    for index, (source_variant, normalized_variant) in enumerate(
-        zip(source_product.variants, normalized_product.variants, strict=True), start=1
-    ):
-        if len(source_product.variants) > 1:
-            print(f"Variant {index}")
-        print(f"source_color: {source_variant.source_color}")
-        print(f"normalized_color: {normalized_variant.normalized_color}")
-        print(f"source_material: {source_variant.source_material}")
-        print(f"normalized_material: {normalized_variant.normalized_material}")
-        print(f"image_count: {len(source_variant.images)}")
-        for image in source_variant.images:
-            print(f"image_url: {image.source_url}")
-        attributes = source_variant.variant_attributes.get("article_attributes", {})
-        if attributes:
-            print(f"article_attributes: {json.dumps(attributes, sort_keys=True)}")
-        resolved_evidence = normalized_variant.variant_attributes.get("attribute_evidence", {})
-        if resolved_evidence:
-            print(f"resolved_attribute_evidence: {json.dumps(resolved_evidence, sort_keys=True)}")
-    evidence = source_product.source_payload.get("attribute_evidence", {})
-    if evidence:
-        print(f"attribute_evidence: {json.dumps(evidence, sort_keys=True)}")
+def build_validation_report(product: CatalogProduct, *, normalized: bool) -> dict[str, object]:
+    """Render raw Article facts separately from optional deterministic normalization."""
+    normalized_product = normalize_product(product).product if normalized else None
+    normalized_variants = (
+        [
+            _variant_report(source_variant, normalized_variant)
+            for source_variant, normalized_variant in zip(product.variants, normalized_product.variants, strict=True)
+        ]
+        if normalized_product
+        else None
+    )
+    return {
+        "source_product": product.model_dump(mode="json"),
+        "normalized": {
+            "canonical_furniture_type_code": normalized_product.canonical_furniture_type_code,
+            "variants": normalized_variants,
+        } if normalized_product else None,
+    }
 
 
 async def inspect(url: str, normalized: bool = False) -> None:
     adapter = ArticleVendorAdapter()
     product = await adapter.fetch_product(url, HttpFetcher())
-    print(json.dumps(product.model_dump(mode="json"), indent=2, sort_keys=True))
-    if normalized:
-        normalized_product = normalize_product(product).product
-        print()
-        _print_dimensions("SOURCE DIMENSIONS", product)
-        print()
-        _print_dimensions("NORMALIZED DIMENSIONS", normalized_product)
-        print()
-        _print_rich_attributes(product, normalized_product)
+    print(json.dumps(build_validation_report(product, normalized=normalized), indent=2, sort_keys=True, default=str))
 
 
 def main() -> None:

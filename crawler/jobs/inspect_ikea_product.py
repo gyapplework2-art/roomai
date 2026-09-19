@@ -32,6 +32,9 @@ def _variant_report(source_variant, normalized_variant) -> dict[str, object]:
             "normalized_color": normalized_variant.normalized_color,
             "source_material": source_variant.source_material,
             "normalized_material": normalized_variant.normalized_material,
+            "normalized_attributes": normalized_variant.variant_attributes.get(
+                "normalized_attributes", {}
+            ),
             "labeled_html_attributes": source_variant.variant_attributes.get(
                 "ikea_labeled_attributes", {}
             ),
@@ -102,6 +105,7 @@ def build_validation_report(product: CatalogProduct, *, normalized: bool) -> dic
             "product_name": product.source_product_name,
             "source_category": product.source_category,
             "source_description": product.source_description,
+            "canonical_furniture_type_code": normalized_product.canonical_furniture_type_code if normalized else None,
         },
         "variants": variants,
         "evidence": {

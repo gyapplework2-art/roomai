@@ -334,7 +334,8 @@ def _identity_is_flatwoven_rug(normalized_name: str) -> bool:
 def _design_attribute_for_label(label: object) -> str | None:
     if not isinstance(label, str):
         return None
-    return _DESIGN_ATTRIBUTE_LABELS.get(" ".join(label.strip().casefold().split()))
+    normalized = label.strip().casefold().rstrip(":").strip()
+    return _DESIGN_ATTRIBUTE_LABELS.get(" ".join(normalized.split()))
 
 
 def _normalize_design_attribute_value(attribute_name: str, value: object) -> object | None:
