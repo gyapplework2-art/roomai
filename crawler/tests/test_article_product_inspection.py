@@ -32,6 +32,8 @@ def test_normalized_article_report_exposes_identity_attributes_material_style_an
         "cushion_fill": "foam_and_fiber",
         "assembly_required": False,
     }
+    assert report["normalized"]["variants"][0]["offer"]["source"]["source_availability"] == "https://schema.org/InStock"
+    assert report["normalized"]["variants"][0]["offer"]["normalized"]["normalized_availability"] == "in_stock"
     assert report["normalized"]["variants"][0]["dimensions"]["source_dimension_details"] == {}
 
 
@@ -68,3 +70,16 @@ def test_source_only_article_report_does_not_claim_normalized_results():
     assert report["normalized"] is None
     assert report["source_product"]["source_category"] is None
     assert report["source_product"]["variants"][0]["normalized_color"] is None
+
+
+def test_article_report_exposes_missing_offer_as_none_in_both_views():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Offerless Sofa",
+        source_category="Sofas",
+        product_url="https://example.com/article/offerless-sofa",
+        variants=[CatalogVariant()],
+    )
+    report = build_validation_report(product, normalized=True)
+
+    assert report["normalized"]["variants"][0]["offer"] == {"source": None, "normalized": None}

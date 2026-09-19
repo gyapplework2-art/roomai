@@ -45,6 +45,10 @@ def _variant_report(source_variant, normalized_variant) -> dict[str, object]:
             "source_dimension_details": source_dimensions.dimension_details if source_dimensions else {},
             "normalized": normalized_dimensions.model_dump(mode="json") if normalized_dimensions else None,
         },
+        "offer": {
+            "source": source_variant.current_offer.model_dump(mode="json") if source_variant.current_offer else None,
+            "normalized": normalized_variant.current_offer.model_dump(mode="json") if normalized_variant.current_offer else None,
+        },
         "media": {
             "image_count": len(source_variant.images),
             "images": [image.model_dump(mode="json") for image in source_variant.images],
