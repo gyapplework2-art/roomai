@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from crawler.core.html_attributes import extract_labeled_attributes, map_labeled_attributes
+from crawler.core.evidence_resolution import resolve_attribute, variant_attribute_candidates
 from crawler.core.url_semantics import configured_slug_evidence, product_slug, slug_tokens
 
 
@@ -45,3 +46,34 @@ def test_unconfigured_url_tokens_do_not_become_attribute_evidence():
         material_tokens={"leather"},
         color_phrases={("charme", "tan")},
     ) == {}
+
+
+def test_upholstery_color_is_labeled_html_color_evidence():
+    candidates = variant_attribute_candidates(
+        None,
+        None,
+        {"article_html_specifications": {"Upholstery Color": "Charme Tan"}},
+        {},
+    )
+
+    assert len(candidates["color"]) == 1
+    candidate = candidates["color"][0]
+    assert candidate.value == "Charme Tan"
+    assert candidate.source == "labeled_html"
+    assert candidate.priority == 3
+
+
+def test_labeled_upholstery_color_beats_matching_url_evidence_and_preserves_both_candidates():
+    candidates = variant_attribute_candidates(
+        None,
+        None,
+        {"article_html_specifications": {"Upholstery Color": "Charme Tan"}},
+        {"color": [{"value": "charme tan", "source": "vendor_url_slug", "method": "deterministic"}]},
+    )
+    resolved = resolve_attribute(candidates["color"])
+
+    assert resolved.selected is not None
+    assert resolved.selected.value == "Charme Tan"
+    assert resolved.selected.source == "labeled_html"
+    assert [candidate.value for candidate in resolved.candidates] == ["Charme Tan", "charme tan"]
+    assert [candidate.source for candidate in resolved.candidates] == ["labeled_html", "vendor_url_slug"]

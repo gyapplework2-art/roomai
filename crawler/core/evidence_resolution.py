@@ -7,7 +7,7 @@ EvidenceSource = Literal["official_api", "structured_data", "labeled_html", "ven
 AttributeConcept = Literal["color", "material", "style"]
 _PRIORITY = {"official_api": 1, "structured_data": 2, "labeled_html": 3, "vendor_url_slug": 4}
 _LABEL_CONCEPTS = {
-    "color": "color", "colour": "color", "finish": "color", "fabric color": "color", "leather color": "color",
+    "color": "color", "colour": "color", "finish": "color", "fabric color": "color", "leather color": "color", "upholstery color": "color",
     "material": "material", "materials": "material", "upholstery": "material", "upholstery material": "material", "fabric": "material", "leather": "material",
     "style": "style", "design style": "style", "furniture style": "style", "product style": "style",
 }
