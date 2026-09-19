@@ -86,6 +86,53 @@ def test_explicit_article_fabric_attributes_remain_separate_from_normalized_valu
     assert normalized_variant.normalized_material == "fabric"
 
 
+def test_article_html_specifications_preserve_explicit_material_without_prose_inference():
+    product = parse_fixture("html_specifications_rug.html")
+    variant = product.variants[0]
+
+    assert variant.source_material == "70% wool, 30% viscose"
+    assert variant.variant_attributes["article_html_specifications"] == {
+        "Materials": "70% wool, 30% viscose",
+    }
+    assert product.source_payload["article_html_specifications"] == {
+        "Materials": "70% wool, 30% viscose",
+    }
+    assert "construction" not in normalize_product(product).product.variants[0].variant_attributes["normalized_attributes"]
+    assert "Not a specification" not in str(variant.variant_attributes["article_html_specifications"])
+
+
+def test_article_embedded_product_state_material_outranks_html_specification():
+    html = '''
+    <script type="application/ld+json">{"@type":"Product","name":"State Material Sofa","sku":"STATE-1","url":"https://example.com/article/state-1"}</script>
+    <script id="article-product-state" type="application/json">{"product":{"attributes":[{"label":"Material","value":"Velvet"}]}}</script>
+    <div class="flex-grid specs-rows"><div class="specs-title">Materials</div><div class="specs-value"><span>Wool</span></div></div>
+    '''
+    product = ArticleVendorAdapter().parse_product(html, "https://example.com/article/state-1")
+
+    assert product.variants[0].source_material == "Velvet"
+    assert product.variants[0].variant_attributes["article_html_specifications"] == {"Materials": "Wool"}
+
+
+def test_article_json_ld_material_outranks_embedded_state_and_html_specification():
+    html = '''
+    <script type="application/ld+json">{"@type":"Product","name":"Structured Material Sofa","sku":"JSON-1","url":"https://example.com/article/json-1","material":"Leather"}</script>
+    <script id="article-product-state" type="application/json">{"product":{"attributes":[{"label":"Material","value":"Velvet"}]}}</script>
+    <div class="flex-grid specs-rows"><div class="specs-title">Materials</div><div class="specs-value"><span>Wool</span></div></div>
+    '''
+    product = ArticleVendorAdapter().parse_product(html, "https://example.com/article/json-1")
+
+    assert product.variants[0].source_material == "Leather"
+    assert product.variants[0].variant_attributes["article_html_specifications"] == {"Materials": "Wool"}
+
+
+def test_article_specs_parser_does_not_collect_unrelated_div_pairs():
+    product = parse_fixture("html_specifications_rug.html")
+
+    assert product.source_payload["article_html_specifications"] == {
+        "Materials": "70% wool, 30% viscose",
+    }
+
+
 def test_explicit_gallery_images_are_deduplicated_filtered_and_keep_source_order():
     product = parse_fixture("rich_leather_sofa.html")
 

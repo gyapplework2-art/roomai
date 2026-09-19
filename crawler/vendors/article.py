@@ -28,6 +28,8 @@ _MATERIAL_ATTRIBUTE_NAMES = frozenset({"material", "upholstery", "upholstery mat
 _NON_PRODUCT_IMAGE_ROLES = frozenset({"logo", "recommendation", "thumbnail"})
 _URL_MATERIAL_TOKENS = {"leather", "fabric", "velvet"}
 _URL_COLOR_PHRASES = {("charme", "tan"), ("cloud", "gray"), ("rain", "cloud", "gray")}
+_ARTICLE_HTML_COLOR_LABELS = _COLOR_ATTRIBUTE_NAMES
+_ARTICLE_HTML_MATERIAL_LABELS = _MATERIAL_ATTRIBUTE_NAMES | {"materials"}
 
 
 class ArticleExtractionError(ValueError):
@@ -98,6 +100,65 @@ class _ProductStateParser(HTMLParser):
             self._parts = []
 
 
+class _ArticleSpecificationsParser(HTMLParser):
+    """Extract explicit Article specs-title/specs-value row pairs only."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.specifications: dict[str, str] = {}
+        self._div_depth = 0
+        self._row_depth: int | None = None
+        self._title_depth: int | None = None
+        self._value_depth: int | None = None
+        self._title_parts: list[str] = []
+        self._value_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "div":
+            return
+        self._div_depth += 1
+        classes = set((dict(attrs).get("class") or "").split())
+        if self._row_depth is None and "specs-rows" in classes:
+            self._row_depth = self._div_depth
+            return
+        if self._row_depth is not None and self._title_depth is None and "specs-title" in classes:
+            self._title_depth = self._div_depth
+            self._title_parts = []
+        elif self._row_depth is not None and self._value_depth is None and "specs-value" in classes:
+            self._value_depth = self._div_depth
+            self._value_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._title_depth is not None:
+            self._title_parts.append(data)
+        elif self._value_depth is not None:
+            self._value_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag != "div":
+            return
+        if self._title_depth == self._div_depth:
+            self._title_depth = None
+        if self._value_depth == self._div_depth:
+            self._value_depth = None
+        if self._row_depth == self._div_depth:
+            label = " ".join("".join(self._title_parts).split())
+            value = " ".join("".join(self._value_parts).split())
+            if label and value:
+                self.specifications[label] = value
+            self._row_depth = None
+            self._title_parts = []
+            self._value_parts = []
+        self._div_depth -= 1
+
+
+def _article_html_specifications(html: str) -> dict[str, object]:
+    parser = _ArticleSpecificationsParser()
+    parser.feed(html)
+    parser.close()
+    return parser.specifications
+
+
 def _text(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
@@ -147,6 +208,20 @@ def _attribute_values(state: dict[str, object] | None) -> tuple[str | None, str 
         if normalized_label in _MATERIAL_ATTRIBUTE_NAMES and material is None:
             material = value
     return color, material, preserved
+
+
+def _html_attribute_values(specifications: dict[str, object]) -> tuple[str | None, str | None]:
+    color = None
+    material = None
+    for label, value in specifications.items():
+        if not isinstance(label, str) or not isinstance(value, str):
+            continue
+        normalized_label = label.strip().casefold().rstrip(":").strip()
+        if normalized_label in _ARTICLE_HTML_COLOR_LABELS and color is None:
+            color = value
+        if normalized_label in _ARTICLE_HTML_MATERIAL_LABELS and material is None:
+            material = value
+    return color, material
 
 
 def _article_page_id(value: object) -> str | None:
@@ -304,19 +379,22 @@ def _variant(
     node: dict[str, object],
     checked_at: datetime,
     state: dict[str, object] | None = None,
+    html_specifications: dict[str, object] | None = None,
 ) -> CatalogVariant:
     state_color, state_material, state_attributes = _attribute_values(state)
+    html_color, html_material = _html_attribute_values(html_specifications or {})
     return CatalogVariant(
         vendor_sku=_text(node.get("sku")),
         vendor_variant_id=_text(node.get("@id") or node.get("productID")),
         variant_name=_text(node.get("name")),
-        source_color=_text(node.get("color")) or state_color,
-        source_material=_text(node.get("material")) or state_material,
+        source_color=_text(node.get("color")) or state_color or html_color,
+        source_material=_text(node.get("material")) or state_material or html_material,
         configuration=_text(node.get("model") or node.get("additionalType")),
         seating_capacity=_integer(node.get("seatingCapacity")),
         variant_attributes={
             "source": node,
             "article_attributes": state_attributes,
+            "article_html_specifications": html_specifications or {},
         },
         dimensions=_dimensions(node),
         images=_unique_images(_gallery_images(state), _images(node.get("image"))),
@@ -353,7 +431,7 @@ class ArticleVendorAdapter(BaseVendorAdapter):
         state = _embedded_product_state(source)
         products = extract_products(source)
         if products:
-            return self._from_structured_product(products[0], product_url, checked_at, state)
+            return self._from_structured_product(products[0], product_url, checked_at, state, source)
         return self._from_html_fallback(source, product_url)
 
     def _from_structured_product(
@@ -362,16 +440,18 @@ class ArticleVendorAdapter(BaseVendorAdapter):
         requested_url: str | None,
         checked_at: datetime,
         state: dict[str, object] | None,
+        html: str,
     ) -> ProductSourceRecord:
         source = facts.source
         name = facts.name
         product_url = facts.url or requested_url
         if not name or not product_url:
             raise ArticleExtractionError("Product structured data must include a name and URL.")
+        html_specifications = _article_html_specifications(html)
         variant_nodes = _as_dicts(source.get("hasVariant"))
-        variants = [_variant(node, checked_at, state) for node in variant_nodes]
+        variants = [_variant(node, checked_at, state, html_specifications) for node in variant_nodes]
         if not variants:
-            variants = [_variant(source, checked_at, state)]
+            variants = [_variant(source, checked_at, state, html_specifications)]
         url_evidence = configured_slug_evidence(
             product_url,
             material_tokens=_URL_MATERIAL_TOKENS,
@@ -394,6 +474,7 @@ class ArticleVendorAdapter(BaseVendorAdapter):
                 "related_products": source.get("isRelatedTo"),
                 "related_article_page_ids": _related_article_page_ids(source.get("isRelatedTo")),
                 "article_product_attributes": _attribute_values(state)[2],
+                "article_html_specifications": html_specifications,
                 "attribute_evidence": url_evidence,
             },
             variants=variants,
