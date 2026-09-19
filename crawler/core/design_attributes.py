@@ -111,6 +111,7 @@ _DESIGN_ATTRIBUTE_LABELS = MappingProxyType({
     "top material": "tabletop_material",
     "leg": "base_material",
     "base material": "base_material",
+    "shade": "shade_material",
 })
 
 FURNITURE_TYPE_ATTRIBUTES: Mapping[str, tuple[str, ...]] = MappingProxyType({
@@ -268,6 +269,12 @@ def normalized_identity_design_attributes(
             attributes["headboard"] = True
     if furniture_type_code == "desk" and _identity_is_sit_stand_desk(normalized_name) and is_attribute_applicable(furniture_type_code, "sit_stand"):
         attributes["sit_stand"] = True
+    if furniture_type_code in {"floor_lamp", "table_lamp", "pendant_chandelier"}:
+        if _identity_is_dimmable_lighting(normalized_name) and is_attribute_applicable(furniture_type_code, "dimmable"):
+            attributes["dimmable"] = True
+        bulb_count = _identity_bulb_count(normalized_name)
+        if bulb_count is not None and is_attribute_applicable(furniture_type_code, "bulb_count"):
+            attributes["bulb_count"] = bulb_count
     return attributes
 
 
@@ -309,6 +316,15 @@ def _identity_is_sit_stand_desk(normalized_name: str) -> bool:
     )
 
 
+def _identity_is_dimmable_lighting(normalized_name: str) -> bool:
+    return re.search(r"\bdimmable\b", normalized_name) is not None
+
+
+def _identity_bulb_count(normalized_name: str) -> int | None:
+    match = re.search(r"\bwith\s+([1-9][0-9]*)\s+lights\b", normalized_name)
+    return int(match.group(1)) if match else None
+
+
 def _design_attribute_for_label(label: object) -> str | None:
     if not isinstance(label, str):
         return None
@@ -318,7 +334,7 @@ def _design_attribute_for_label(label: object) -> str | None:
 def _normalize_design_attribute_value(attribute_name: str, value: object) -> object | None:
     if not isinstance(value, str):
         return None
-    if attribute_name in {"upholstery", "frame_material", "tabletop_material", "base_material"}:
+    if attribute_name in {"upholstery", "frame_material", "tabletop_material", "base_material", "shade_material"}:
         return normalize_material(value)
     if attribute_name == "cushion_fill":
         return normalize_cushion_fill(value)

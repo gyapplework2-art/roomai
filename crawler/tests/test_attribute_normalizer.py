@@ -678,6 +678,105 @@ def test_observed_article_madera_ordinary_desk_does_not_gain_missing_feature_boo
     assert "shelf_count" not in variant.variant_attributes["normalized_attributes"]
 
 
+def test_observed_table_lamp_shade_glass_and_dimmable_identity_are_normalized():
+    attributes = {"Base:": "Steel, Powder coating", "Shade": "Glass"}
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name='TÄRNABY Table lamp - dimmable beige 10 "',
+        source_category="Table lamps",
+        product_url="https://example.com/products/tarnaby-table-lamp",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"dimmable": True, "shade_material": "glass"}
+    assert "base_material" not in variant.variant_attributes["normalized_attributes"]
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
+def test_observed_pendant_lamp_bulb_count_and_shade_material_ignore_description_only_facts():
+    attributes = {"Shade": "Glass", "Lamp house:": "Steel"}
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name='KRANSALG Pendant lamp with 5 lights - black 44 "',
+        source_category="Pendant lights",
+        source_description="Uses GU10 bulbs with adjustable height and directed light.",
+        source_features=["GU10", "adjustable height", "directed light"],
+        product_url="https://example.com/products/kransalg-pendant-lamp-5-lights",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"bulb_count": 5, "shade_material": "glass"}
+    assert "bulb_base" not in variant.variant_attributes["normalized_attributes"]
+    assert "bulb_type" not in variant.variant_attributes["normalized_attributes"]
+    assert "adjustable_drop" not in variant.variant_attributes["normalized_attributes"]
+    assert "light_direction" not in variant.variant_attributes["normalized_attributes"]
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
+def test_observed_floor_lamp_polyester_shade_is_preserved_but_unresolved_conservatively():
+    attributes = {
+        "Shade": "100% polyester (min. 90% recycled)",
+        "Upper tube/ Lower tube/ Base:": "Solid ash, Acrylic stain",
+    }
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="KINNAHULT Floor lamp",
+        source_category="Floor lamps",
+        product_url="https://example.com/products/kinnahult-floor-lamp",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+    assert "shade_material" not in variant.variant_attributes["normalized_attributes"]
+    assert "base_material" not in variant.variant_attributes["normalized_attributes"]
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
+def test_ordinary_lamp_name_and_unrelated_numbers_do_not_create_lighting_defaults():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name='KINNAHULT Floor lamp 47 1/4 "',
+        source_category="Floor lamps",
+        product_url="https://example.com/products/kinnahult-floor-lamp-47",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+    assert "dimmable" not in variant.variant_attributes["normalized_attributes"]
+    assert "bulb_count" not in variant.variant_attributes["normalized_attributes"]
+
+
+def test_lighting_description_only_facts_do_not_create_normalized_attributes():
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="KRANSALG Pendant lamp",
+        source_category="Pendant lights",
+        source_description="Dimmable with 5 lights, GU10 bulbs, adjustable height, and directed light.",
+        source_features=["dimmable", "5 lights", "GU10", "adjustable height", "directed light"],
+        product_url="https://example.com/products/kransalg-pendant-lamp-with-5-lights-dimmable-gu10",
+        variants=[CatalogVariant()],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+
+
+def test_shade_label_requires_applicable_lighting_furniture_type():
+    attributes = {"Shade": "Glass"}
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Sofa", source_category="Sofas", product_url="https://example.com/p",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
 def test_existing_normalized_attributes_dict_is_preserved_for_future_facts():
     product = CatalogProduct(
         vendor_market_code="US", source_product_name="Sofa", product_url="https://example.com/p",
