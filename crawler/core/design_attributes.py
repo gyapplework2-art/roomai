@@ -114,6 +114,7 @@ _DESIGN_ATTRIBUTE_LABELS = MappingProxyType({
     "leg": "base_material",
     "base material": "base_material",
     "shade": "shade_material",
+    "construction": "construction",
 })
 
 FURNITURE_TYPE_ATTRIBUTES: Mapping[str, tuple[str, ...]] = MappingProxyType({
@@ -261,7 +262,7 @@ def _normalize_pile_specification(furniture_type_code: str | None, value: object
     pile_type = match.group(2).casefold()
     if measurement is None or measurement["unit"] not in {"in", "inch", "inches", "cm", "centimeter", "centimeters"}:
         return {}
-    if pile_type != "medium":
+    if pile_type not in {"medium", "shag"}:
         return {}
     centimeters = Decimal(str(measurement["value"])) * Decimal("2.54") if measurement["unit"] in {"in", "inch", "inches"} else Decimal(str(measurement["value"]))
     normalized: dict[str, object] = {}
@@ -380,6 +381,9 @@ def _normalize_design_attribute_value(attribute_name: str, value: object) -> obj
         return normalize_cushion_fill(value)
     if attribute_name == "assembly_required":
         return normalize_boolean(value)
+    if attribute_name == "construction":
+        normalized = " ".join(value.casefold().split()).replace("-", "")
+        return normalized if normalized in {"handwoven", "flatwoven"} else None
     return None
 
 

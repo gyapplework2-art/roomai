@@ -856,18 +856,29 @@ def test_rug_identity_preserves_existing_normalized_attributes():
 
 
 def test_article_rug_pile_specification_normalizes_height_and_type_without_mutating_raw_value():
-    raw_value = '1/2" - Medium'
+    raw_pile = '1" - Shag'
+    raw_construction = "Handwoven"
     product = CatalogProduct(
         vendor_market_code="US",
         source_product_name="Texa 8 x 10 Rug - Vanilla Ivory",
         source_category="Rugs",
         product_url="https://example.com/article/product/1834/texa-rug",
-        variants=[CatalogVariant(variant_attributes={"article_html_specifications": {"Pile": raw_value}})],
+        variants=[CatalogVariant(variant_attributes={"article_html_specifications": {
+            "Pile": raw_pile,
+            "Construction": raw_construction,
+        }})],
     )
     normalized = normalize_product(product).product.variants[0]
 
-    assert normalized.variant_attributes["normalized_attributes"] == {"pile_height": 1.27, "pile_type": "medium"}
-    assert normalized.variant_attributes["article_html_specifications"]["Pile"] == raw_value
+    assert normalized.variant_attributes["normalized_attributes"] == {
+        "pile_height": 2.54,
+        "pile_type": "shag",
+        "construction": "handwoven",
+    }
+    assert normalized.variant_attributes["article_html_specifications"] == {
+        "Pile": raw_pile,
+        "Construction": raw_construction,
+    }
 
 
 def test_article_rug_pile_specification_requires_rug_applicability():
@@ -894,6 +905,20 @@ def test_malformed_or_unsupported_pile_specifications_remain_unresolved(value: s
 
     assert "pile_height" not in normalized.variant_attributes["normalized_attributes"]
     assert "pile_type" not in normalized.variant_attributes["normalized_attributes"]
+
+
+def test_explicit_construction_normalizes_only_for_area_rugs():
+    rug = CatalogProduct(
+        vendor_market_code="US", source_product_name="Rug", source_category="Rugs", product_url="https://example.com/rug",
+        variants=[CatalogVariant(variant_attributes={"article_html_specifications": {"Construction": "flat-woven"}})],
+    )
+    sofa = CatalogProduct(
+        vendor_market_code="US", source_product_name="Sofa", source_category="Sofas", product_url="https://example.com/sofa",
+        variants=[CatalogVariant(variant_attributes={"article_html_specifications": {"Construction": "Handwoven"}})],
+    )
+
+    assert normalize_product(rug).product.variants[0].variant_attributes["normalized_attributes"] == {"construction": "flatwoven"}
+    assert normalize_product(sofa).product.variants[0].variant_attributes["normalized_attributes"] == {}
 
 
 def test_article_core_html_labels_do_not_become_pile_design_attributes():
