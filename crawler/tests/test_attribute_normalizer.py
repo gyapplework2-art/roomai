@@ -855,6 +855,79 @@ def test_rug_identity_preserves_existing_normalized_attributes():
     assert variant.variant_attributes["normalized_attributes"] == {"washable": True, "construction": "flatwoven"}
 
 
+def test_mirror_simple_frame_label_uses_generic_frame_material_normalization():
+    attributes = {"Frame": "Aluminum"}
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Simple Mirror",
+        source_category="Large mirrors",
+        product_url="https://example.com/products/simple-mirror",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"frame_material": "aluminum"}
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
+def test_hovet_like_mirror_composite_frame_and_mirror_glass_remain_unresolved():
+    attributes = {
+        "Mirror glass:": "Glass, Plastic foil",
+        "Frame:": "Aluminum, Anodized",
+    }
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name='HOVET Mirror - gold 30 3/4x77 1/8 "',
+        source_category="Large mirrors",
+        source_description="Can be placed horizontally or vertically, on the wall or leaning on the floor.",
+        product_url="https://example.com/products/hovet-mirror",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+    assert "frame_material" not in variant.variant_attributes["normalized_attributes"]
+    assert "frame_finish" not in variant.variant_attributes["normalized_attributes"]
+    assert "orientation" not in variant.variant_attributes["normalized_attributes"]
+    assert "wall_mountable" not in variant.variant_attributes["normalized_attributes"]
+    assert "full_length" not in variant.variant_attributes["normalized_attributes"]
+    assert "shape" not in variant.variant_attributes["normalized_attributes"]
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
+def test_mirror_frame_material_requires_applicable_furniture_type():
+    attributes = {"Frame": "Aluminum"}
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Simple Rug",
+        source_category="Rugs",
+        product_url="https://example.com/products/simple-rug",
+        variants=[CatalogVariant(variant_attributes={"ikea_labeled_attributes": attributes})],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {}
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
+def test_mirror_frame_material_preserves_existing_normalized_attributes():
+    attributes = {"Frame": "Aluminum"}
+    product = CatalogProduct(
+        vendor_market_code="US",
+        source_product_name="Simple Mirror",
+        source_category="Large mirrors",
+        product_url="https://example.com/products/simple-mirror",
+        variants=[CatalogVariant(variant_attributes={
+            "normalized_attributes": {"wall_mountable": True},
+            "ikea_labeled_attributes": attributes,
+        })],
+    )
+    variant = normalize_product(product).product.variants[0]
+
+    assert variant.variant_attributes["normalized_attributes"] == {"wall_mountable": True, "frame_material": "aluminum"}
+    assert variant.variant_attributes["ikea_labeled_attributes"] == attributes
+
+
 def test_existing_normalized_attributes_dict_is_preserved_for_future_facts():
     product = CatalogProduct(
         vendor_market_code="US", source_product_name="Sofa", product_url="https://example.com/p",
