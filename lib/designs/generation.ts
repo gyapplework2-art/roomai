@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 
+import type { CatalogCandidate } from "@/lib/catalog/schema";
 import { designSpecificationSchema } from "@/lib/designs/schema";
 import { getWallLengthCm, getWallOrientation } from "@/lib/geometry/dimensions";
 import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
@@ -166,20 +167,26 @@ Fit the supplied room geometry, include every must-have item, and include nice-t
 
 This is a proposal, not a geometry-certified layout. Keep furniture within the supplied polygon, use conservative dimensions, avoid obvious overlaps where possible, leave warnings for uncertain constraints, and never claim validated door, window, or walkway clearance. Every furniture widthCm, depthCm, and heightCm must be a realistic numeric centimeter value strictly greater than 0; never use 0 for any furniture dimension. For physically thin objects such as rugs, mats, panels, or artwork represented as furniture, use a small realistic positive dimension, such as heightCm = 1, rather than 0. position.zCm describes elevation and does not replace the required positive physical dimensions. The DesignSpecification budget object represents the user's budget constraint, not the estimated design cost. budget.low and budget.high must always be numeric, non-negative, and satisfy budget.low <= budget.high. If both budgetMin and budgetMax are provided, preserve those user-specified bounds in the output budget using the project currency. If only budgetMin is provided, use low = budgetMin and high >= low. If only budgetMax is provided, use high = budgetMax and low <= high. If budgetMin and budgetMax are both null, output low = 0 and high = 0 as the deterministic representation of budget unspecified; this does not mean the design is expected to cost zero. Estimated design cost is represented separately by furniture and decoration estimatedPrice values. Never output budget.high less than budget.low. All required numeric fields must satisfy their DesignSpecification Zod constraints, including finite coordinates and positive dimensions. Do not invent product IDs or claim exact product availability. For nullable fields whose value is not applicable or unknown, return null. Do not omit schema fields. Use generated object IDs only for the specification objects. Do not add unnecessary prose.`;
 
-export async function generateDesignSpecification(brief: DesignBrief) {
+export async function generateDesignSpecification(
+  brief: DesignBrief,
+  catalogCandidates: CatalogCandidate[] = [],
+) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("AI_NOT_CONFIGURED");
   }
 
   const openai = new OpenAI({ apiKey });
+  const catalogGrounding = catalogCandidates.length > 0
+    ? `\n\nAvailable real catalog candidates:\n${JSON.stringify(catalogCandidates)}\n\nThe supplied catalog candidates are real available products for design grounding. Use their real title, dimensions, material, color, style, and RoomAI selling price when useful. Do not invent additional catalog identity or exact availability; catalog identity selection and persistence are not part of this milestone.`
+    : "";
   const response = await openai.responses.parse({
     model: DESIGN_MODEL,
     input: [
       { role: "system", content: designInstructions },
       {
         role: "user",
-        content: `Design brief:\n${JSON.stringify(brief)}\n\nGeometry summary:\n${brief.geometrySummary}`,
+        content: `Design brief:\n${JSON.stringify(brief)}\n\nGeometry summary:\n${brief.geometrySummary}${catalogGrounding}`,
       },
     ],
     text: {

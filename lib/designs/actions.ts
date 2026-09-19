@@ -1,5 +1,7 @@
 "use server";
 
+import { findCatalogProducts } from "@/lib/catalog/query";
+import { deduplicateCatalogCandidates, resolveFurnitureTypeCode } from "@/lib/catalog/integration";
 import { generateDesignSpecification, createDesignBrief } from "@/lib/designs/generation";
 import {
   DesignPersistenceError,
@@ -101,13 +103,43 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
   let specification: DesignSpecification;
 
   try {
+    const brief = createDesignBrief(
+      projectResult.data as Tables<"projects">,
+      preferencesResult.data as Tables<"room_preferences"> | null,
+      geometryParsed.data as RoomGeometry,
+      openings,
+    );
+    const requestedFurnitureTypes = [
+      ...brief.preferences.mustHaveItems,
+      ...brief.preferences.niceToHaveItems,
+    ]
+      .map(resolveFurnitureTypeCode)
+      .filter((code): code is string => code !== null);
+    const uniqueFurnitureTypes = [...new Set(requestedFurnitureTypes)];
+    const catalogResults = await Promise.all(
+      uniqueFurnitureTypes.map(async (furnitureTypeCode) => {
+        try {
+          return await findCatalogProducts({
+            countryCode: "US",
+            furnitureTypeCode,
+            currency: brief.project.currency,
+            normalizedAvailability: "in_stock",
+            limit: 10,
+          });
+        } catch (error) {
+          console.error("RoomAI catalog enrichment failed", {
+            projectId,
+            furnitureTypeCode,
+            error: error instanceof Error ? error.name : "UnknownError",
+          });
+          return [];
+        }
+      }),
+    );
+    const catalogCandidates = deduplicateCatalogCandidates(catalogResults.flat());
     specification = await generateDesignSpecification(
-        createDesignBrief(
-        projectResult.data as Tables<"projects">,
-        preferencesResult.data as Tables<"room_preferences"> | null,
-        geometryParsed.data as RoomGeometry,
-        openings,
-      ),
+      brief,
+      catalogCandidates,
     );
   } catch (error) {
     if (error instanceof Error && error.message === "AI_NOT_CONFIGURED") {
