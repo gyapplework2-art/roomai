@@ -25,6 +25,7 @@ const specification: DesignSpecification = {
       rotationDegrees: 0,
       required: true,
       estimatedPrice: 1000,
+      catalogSelectionKey: null,
       reasoning: "Required seating.",
     },
   ],
@@ -64,4 +65,19 @@ test("decoration design object inserts explicitly leave catalog identity null", 
   assert.equal(decoration.catalog_product_id, null);
   assert.equal(decoration.catalog_product_variant_id, null);
   assert.equal(decoration.name, "Art");
+});
+
+test("matched furniture design object inserts use server-resolved catalog identity", () => {
+  const [furniture, decoration] = createDesignObjectInserts("design-1", specification, {
+    "furniture-1": {
+      catalogProductId: "catalog-product-1",
+      catalogProductVariantId: "catalog-variant-1",
+    },
+  });
+
+  assert.equal(furniture.catalog_product_id, "catalog-product-1");
+  assert.equal(furniture.catalog_product_variant_id, "catalog-variant-1");
+  assert.equal(furniture.product_id, null);
+  assert.equal(decoration.catalog_product_id, null);
+  assert.equal(decoration.catalog_product_variant_id, null);
 });

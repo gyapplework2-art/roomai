@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import type { CatalogSelectionsByObjectId } from "@/lib/catalog/integration";
 import { DESIGN_MODEL, DESIGN_PROMPT_VERSION } from "@/lib/designs/generation";
 import type { DesignSpecification } from "@/lib/designs/types";
 import type { Database, Json, TablesInsert } from "@/types/database.types";
@@ -15,6 +16,7 @@ type DesignObjectInsert = TablesInsert<"design_objects">;
 export type PersistDesignInput = {
   projectId: string;
   specification: DesignSpecification;
+  catalogSelectionsByObjectId?: CatalogSelectionsByObjectId;
   generationStartedAt: string;
   generationCompletedAt: string;
 };
@@ -65,26 +67,30 @@ async function nextVersion(client: DesignClient, projectId: string) {
 export function createDesignObjectInserts(
   designId: string,
   specification: DesignSpecification,
+  catalogSelectionsByObjectId: CatalogSelectionsByObjectId = {},
 ): DesignObjectInsert[] {
-  const furnitureObjects: DesignObjectInsert[] = specification.furniture.map((furniture) => ({
-    design_id: designId,
-    object_type: "furniture",
-    category: furniture.category,
-    name: furniture.name,
-    x_cm: furniture.position.xCm,
-    y_cm: furniture.position.yCm,
-    z_cm: furniture.position.zCm,
-    width_cm: furniture.dimensions.widthCm,
-    depth_cm: furniture.dimensions.depthCm,
-    height_cm: furniture.dimensions.heightCm,
-    rotation_degrees: furniture.rotationDegrees,
-    material: furniture.material,
-    primary_color: furniture.color,
-    product_id: null,
-    catalog_product_id: null,
-    catalog_product_variant_id: null,
-    reasoning: furniture.reasoning,
-  }));
+  const furnitureObjects: DesignObjectInsert[] = specification.furniture.map((furniture) => {
+    const catalogSelection = catalogSelectionsByObjectId[furniture.objectId];
+    return {
+      design_id: designId,
+      object_type: "furniture",
+      category: furniture.category,
+      name: furniture.name,
+      x_cm: furniture.position.xCm,
+      y_cm: furniture.position.yCm,
+      z_cm: furniture.position.zCm,
+      width_cm: furniture.dimensions.widthCm,
+      depth_cm: furniture.dimensions.depthCm,
+      height_cm: furniture.dimensions.heightCm,
+      rotation_degrees: furniture.rotationDegrees,
+      material: furniture.material,
+      primary_color: furniture.color,
+      product_id: null,
+      catalog_product_id: catalogSelection?.catalogProductId ?? null,
+      catalog_product_variant_id: catalogSelection?.catalogProductVariantId ?? null,
+      reasoning: furniture.reasoning,
+    };
+  });
 
   const decorationObjects: DesignObjectInsert[] = specification.decorations.map((decoration) => ({
     design_id: designId,
@@ -147,7 +153,7 @@ export async function persistDesign(
       throw new DesignPersistenceError("design_insert_failed");
     }
 
-    const objectInserts = createDesignObjectInserts(design.id, input.specification);
+    const objectInserts = createDesignObjectInserts(design.id, input.specification, input.catalogSelectionsByObjectId);
     if (objectInserts.length === 0) {
       return { designId: design.id, version: design.version };
     }

@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { deduplicateCatalogCandidates, resolveFurnitureTypeCode } from "@/lib/catalog/integration";
+import { catalogSelectionTestHelpers } from "@/lib/designs/generation";
 import { furnitureObjectSchema } from "@/lib/designs/schema";
+import type { DesignSpecification } from "@/lib/designs/types";
 
 const candidate = (variantId: string) => ({
   productId: `product-${variantId}`,
@@ -61,6 +63,7 @@ test("furniture schema does not expose catalog identity fields", () => {
     rotationDegrees: 0,
     required: true,
     estimatedPrice: 100,
+    catalogSelectionKey: null,
     reasoning: "Fits the room.",
     productId: "product-1",
     variantId: "variant-1",
@@ -71,4 +74,65 @@ test("furniture schema does not expose catalog identity fields", () => {
     assert.equal("productId" in result.data, false);
     assert.equal("variantId" in result.data, false);
   }
+});
+
+const specificationWithKeys = (keys: Array<string | null>): DesignSpecification => ({
+  contractVersion: "1.0",
+  designName: "Catalog Keys",
+  summary: "Catalog key resolution test.",
+  room: { widthCm: 300, lengthCm: 400, heightCm: 250, roomType: "living_room" },
+  palette: { walls: "white", primary: "blue", secondary: "gray", accent: "black", metal: "brass" },
+  surfaces: { walls: "paint", floor: "wood", ceiling: "paint" },
+  lighting: { ambient: "ceiling", task: "lamp", accent: "sconce" },
+  furniture: keys.map((catalogSelectionKey, index) => ({
+    objectId: `object-${index + 1}`,
+    category: "rug",
+    name: "Rug",
+    description: "A rug",
+    material: "wool",
+    color: "ivory",
+    dimensions: { widthCm: 100, depthCm: 100, heightCm: 1 },
+    position: { xCm: 0, yCm: 0, zCm: 0 },
+    rotationDegrees: 0,
+    required: true,
+    estimatedPrice: 100,
+    catalogSelectionKey,
+    reasoning: "Fits the room.",
+  })),
+  decorations: [],
+  budget: { low: 0, high: 1000, currency: "USD" },
+  advice: ["Keep clearances open."],
+  warnings: [],
+});
+
+test("valid catalog candidate keys resolve to paired product and variant ids", () => {
+  const { selectionByKey } = catalogSelectionTestHelpers.createCatalogCandidateSelectionContext([
+    candidate("variant-1"),
+    candidate("variant-2"),
+  ]);
+  const { catalogSelectionsByObjectId } = catalogSelectionTestHelpers.resolveCatalogSelections(
+    specificationWithKeys(["candidate_1", "candidate_2"]),
+    selectionByKey,
+  );
+
+  assert.deepEqual(catalogSelectionsByObjectId["object-1"], {
+    catalogProductId: "product-variant-1",
+    catalogProductVariantId: "variant-1",
+  });
+  assert.deepEqual(catalogSelectionsByObjectId["object-2"], {
+    catalogProductId: "product-variant-2",
+    catalogProductVariantId: "variant-2",
+  });
+});
+
+test("null or invented catalog candidate keys do not resolve to catalog ids", () => {
+  const { selectionByKey } = catalogSelectionTestHelpers.createCatalogCandidateSelectionContext([candidate("variant-1")]);
+  const { specification, catalogSelectionsByObjectId } = catalogSelectionTestHelpers.resolveCatalogSelections(
+    specificationWithKeys([null, "candidate_999"]),
+    selectionByKey,
+  );
+
+  assert.deepEqual(catalogSelectionsByObjectId, {});
+  assert.equal(specification.furniture[0].catalogSelectionKey, null);
+  assert.equal(specification.furniture[1].catalogSelectionKey, null);
 });

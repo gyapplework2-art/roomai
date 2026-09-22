@@ -1,7 +1,11 @@
 "use server";
 
 import { findCatalogProducts } from "@/lib/catalog/query";
-import { deduplicateCatalogCandidates, resolveFurnitureTypeCode } from "@/lib/catalog/integration";
+import {
+  deduplicateCatalogCandidates,
+  resolveFurnitureTypeCode,
+  type CatalogSelectionsByObjectId,
+} from "@/lib/catalog/integration";
 import { generateDesignSpecification, createDesignBrief } from "@/lib/designs/generation";
 import {
   DesignPersistenceError,
@@ -101,6 +105,7 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
 
   const generationStartedAt = new Date().toISOString();
   let specification: DesignSpecification;
+  let catalogSelectionsByObjectId: CatalogSelectionsByObjectId = {};
 
   try {
     const brief = createDesignBrief(
@@ -137,10 +142,12 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
       }),
     );
     const catalogCandidates = deduplicateCatalogCandidates(catalogResults.flat());
-    specification = await generateDesignSpecification(
+    const generation = await generateDesignSpecification(
       brief,
       catalogCandidates,
     );
+    specification = generation.specification;
+    catalogSelectionsByObjectId = generation.catalogSelectionsByObjectId;
   } catch (error) {
     if (error instanceof Error && error.message === "AI_NOT_CONFIGURED") {
       return { success: false, error: "not_configured" };
@@ -163,6 +170,7 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
     const persistedDesign = await persistDesign(supabase, {
       projectId,
       specification,
+      catalogSelectionsByObjectId,
       generationStartedAt,
       generationCompletedAt,
     });

@@ -63,6 +63,7 @@ export const furnitureObjectSchema = z.object({
   rotationDegrees: finiteNumber,
   required: z.boolean(),
   estimatedPrice: nonNegativeNumber,
+  catalogSelectionKey: nullableText(120),
   reasoning: nonEmptyText(1000),
 });
 
