@@ -41,6 +41,8 @@ export type Database = {
     Tables: {
       design_objects: {
         Row: {
+          catalog_product_id: string | null
+          catalog_product_variant_id: string | null
           category: string | null
           created_at: string
           depth_cm: number | null
@@ -60,6 +62,8 @@ export type Database = {
           z_cm: number | null
         }
         Insert: {
+          catalog_product_id?: string | null
+          catalog_product_variant_id?: string | null
           category?: string | null
           created_at?: string
           depth_cm?: number | null
@@ -79,6 +83,8 @@ export type Database = {
           z_cm?: number | null
         }
         Update: {
+          catalog_product_id?: string | null
+          catalog_product_variant_id?: string | null
           category?: string | null
           created_at?: string
           depth_cm?: number | null
@@ -98,6 +104,20 @@ export type Database = {
           z_cm?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "design_objects_catalog_product_id_fkey"
+            columns: ["catalog_product_id"]
+            isOneToOne: false
+            referencedRelation: "catalog_products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "design_objects_catalog_product_variant_id_fkey"
+            columns: ["catalog_product_variant_id"]
+            isOneToOne: false
+            referencedRelation: "catalog_product_variants"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "design_objects_design_id_fkey"
             columns: ["design_id"]

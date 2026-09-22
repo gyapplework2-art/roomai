@@ -81,6 +81,8 @@ export function createDesignObjectInserts(
     material: furniture.material,
     primary_color: furniture.color,
     product_id: null,
+    catalog_product_id: null,
+    catalog_product_variant_id: null,
     reasoning: furniture.reasoning,
   }));
 
@@ -99,6 +101,8 @@ export function createDesignObjectInserts(
     material: decoration.material,
     primary_color: decoration.color,
     product_id: null,
+    catalog_product_id: null,
+    catalog_product_variant_id: null,
     reasoning: decoration.reasoning,
   }));
 
