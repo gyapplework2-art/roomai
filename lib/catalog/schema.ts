@@ -44,6 +44,9 @@ export const catalogCandidateSchema = z.object({
   estimatedDeliveryDaysMax: z.number().nullable(),
   vendorDataCheckedAt: z.string().nullable(),
   roomaiPriceCalculatedAt: z.string().nullable(),
+  vendorName: z.string(),
+  productUrl: z.string().url(),
+  primaryImageUrl: z.string().url().nullable(),
 });
 
 export type CatalogCandidate = z.infer<typeof catalogCandidateSchema>;

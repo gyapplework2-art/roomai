@@ -52,6 +52,9 @@ type CatalogViewRow = {
   estimated_delivery_days_max: number | null;
   vendor_data_checked_at: string | null;
   roomai_price_calculated_at: string | null;
+  vendor_name: string;
+  product_url: string;
+  primary_image_url: string | null;
 };
 
 export class CatalogQueryError extends Error {
@@ -89,6 +92,9 @@ function toCandidate(row: CatalogViewRow): CatalogCandidate {
     estimatedDeliveryDaysMax: row.estimated_delivery_days_max,
     vendorDataCheckedAt: row.vendor_data_checked_at,
     roomaiPriceCalculatedAt: row.roomai_price_calculated_at,
+    vendorName: row.vendor_name,
+    productUrl: row.product_url,
+    primaryImageUrl: row.primary_image_url,
   });
 }
 
@@ -99,7 +105,7 @@ export async function findCatalogProducts(input: CatalogQuery): Promise<CatalogC
   let request = supabase
     .from(PUBLIC_CATALOG_VIEW)
     .select(
-      "product_id,variant_id,country_code,category_code,category_name,furniture_type_code,furniture_type_name,product_title,roomai_description,normalized_color,normalized_material,normalized_style,configuration,seating_capacity,width_cm,depth_cm,height_cm,weight_kg,currency,roomai_selling_price,normalized_availability,delivery_text,estimated_delivery_days_min,estimated_delivery_days_max,vendor_data_checked_at,roomai_price_calculated_at",
+      "product_id,variant_id,country_code,category_code,category_name,furniture_type_code,furniture_type_name,product_title,roomai_description,normalized_color,normalized_material,normalized_style,configuration,seating_capacity,width_cm,depth_cm,height_cm,weight_kg,currency,roomai_selling_price,normalized_availability,delivery_text,estimated_delivery_days_min,estimated_delivery_days_max,vendor_data_checked_at,roomai_price_calculated_at,vendor_name,product_url,primary_image_url",
     )
     .eq("country_code", query.countryCode)
     .eq("furniture_type_code", query.furnitureTypeCode);
@@ -156,7 +162,7 @@ export async function findCatalogProductsByVariantIds(
   const { data, error } = await supabase
     .from(PUBLIC_CATALOG_VIEW)
     .select(
-      "product_id,variant_id,country_code,category_code,category_name,furniture_type_code,furniture_type_name,product_title,roomai_description,normalized_color,normalized_material,normalized_style,configuration,seating_capacity,width_cm,depth_cm,height_cm,weight_kg,currency,roomai_selling_price,normalized_availability,delivery_text,estimated_delivery_days_min,estimated_delivery_days_max,vendor_data_checked_at,roomai_price_calculated_at",
+      "product_id,variant_id,country_code,category_code,category_name,furniture_type_code,furniture_type_name,product_title,roomai_description,normalized_color,normalized_material,normalized_style,configuration,seating_capacity,width_cm,depth_cm,height_cm,weight_kg,currency,roomai_selling_price,normalized_availability,delivery_text,estimated_delivery_days_min,estimated_delivery_days_max,vendor_data_checked_at,roomai_price_calculated_at,vendor_name,product_url,primary_image_url",
     )
     .in("variant_id", uniqueVariantIds);
 

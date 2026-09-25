@@ -33,6 +33,9 @@ const candidate = (variantId: string) => ({
   estimatedDeliveryDaysMax: null,
   vendorDataCheckedAt: null,
   roomaiPriceCalculatedAt: null,
+  vendorName: "Test Vendor",
+  productUrl: "https://example.com/products/test-product",
+  primaryImageUrl: "https://example.com/images/test-product.jpg",
 });
 
 test("resolves only supported furniture type aliases", () => {

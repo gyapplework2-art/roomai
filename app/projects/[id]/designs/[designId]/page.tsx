@@ -76,18 +76,35 @@ function ObjectList({
         const catalogPrice = catalogCandidate?.currency && catalogCandidate.roomaiSellingPrice !== null
           ? formatMoney(catalogCandidate.currency, catalogCandidate.roomaiSellingPrice)
           : null;
+        const designObjectName = object.name ?? object.category ?? "Unnamed object";
+        const imageAlt = catalogCandidate.productTitle ?? designObjectName;
 
         return (
-          <article key={object.id} className="border border-slate-200 bg-slate-50 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <h3 className="font-medium text-slate-950">{object.name ?? object.category ?? "Unnamed object"}</h3>
+          <article key={object.id} className="overflow-hidden border border-slate-200 bg-slate-50">
+            {catalogCandidate.primaryImageUrl && (
+              <div className="aspect-[4/3] w-full overflow-hidden bg-white">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={catalogCandidate.primaryImageUrl}
+                  alt={imageAlt}
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            )}
+            <div className="p-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{catalogCandidate.vendorName}</p>
+                  <h3 className="mt-1 text-lg font-semibold text-slate-950">{catalogCandidate.productTitle ?? designObjectName}</h3>
+                </div>
+                <Badge variant="outline">Catalog matched</Badge>
+              </div>
+              <div className="mt-3 border-l-2 border-slate-200 pl-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Design selection</p>
+                <p className="mt-1 text-sm font-medium text-slate-900">{designObjectName}</p>
                 {object.category && <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">{object.category}</p>}
               </div>
-              {catalogCandidate && <Badge variant="outline">Catalog matched</Badge>}
-            </div>
-            {object.reasoning && <p className="mt-3 text-sm leading-6 text-slate-700">{object.reasoning}</p>}
-            {catalogCandidate && (
+              {object.reasoning && <p className="mt-3 text-sm leading-6 text-slate-700">{object.reasoning}</p>}
               <dl className="mt-4 grid gap-4 border-t border-slate-200 pt-4 sm:grid-cols-2">
                 <Detail label="RoomAI catalog price" value={catalogPrice} />
                 <Detail label="Material" value={catalogCandidate.normalizedMaterial} />
@@ -97,7 +114,15 @@ function ObjectList({
                 <Detail label="Availability" value={catalogCandidate.normalizedAvailability} />
                 <Detail label="Delivery" value={catalogCandidate.deliveryText} />
               </dl>
-            )}
+              <a
+                href={catalogCandidate.productUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-5 inline-flex text-sm font-semibold text-emerald-700 underline-offset-4 hover:underline"
+              >
+                View product
+              </a>
+            </div>
           </article>
         );
       })}
