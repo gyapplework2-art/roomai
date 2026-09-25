@@ -141,3 +141,40 @@ export async function findCatalogProducts(input: CatalogQuery): Promise<CatalogC
     throw new CatalogQueryError("Catalog result validation failed.");
   }
 }
+
+export async function findCatalogProductsByVariantIds(
+  variantIds: string[],
+): Promise<CatalogCandidate[]> {
+  const uniqueVariantIds = [...new Set(variantIds.filter((id) => id.trim() !== ""))];
+
+  if (uniqueVariantIds.length === 0) {
+    return [];
+  }
+
+  const supabase = createCatalogClient();
+
+  const { data, error } = await supabase
+    .from(PUBLIC_CATALOG_VIEW)
+    .select(
+      "product_id,variant_id,country_code,category_code,category_name,furniture_type_code,furniture_type_name,product_title,roomai_description,normalized_color,normalized_material,normalized_style,configuration,seating_capacity,width_cm,depth_cm,height_cm,weight_kg,currency,roomai_selling_price,normalized_availability,delivery_text,estimated_delivery_days_min,estimated_delivery_days_max,vendor_data_checked_at,roomai_price_calculated_at",
+    )
+    .in("variant_id", uniqueVariantIds);
+
+  if (error) {
+    console.error("Catalog variant lookup failed", {
+      code: error.code,
+      message: error.message,
+    });
+    throw new CatalogQueryError();
+  }
+
+  try {
+    return (data as CatalogViewRow[]).map(toCandidate);
+  } catch (error) {
+    console.error("Catalog variant lookup validation failed", {
+      message: error instanceof Error ? error.message : "Unknown catalog result error",
+    });
+    throw new CatalogQueryError("Catalog result validation failed.");
+  }
+}
+

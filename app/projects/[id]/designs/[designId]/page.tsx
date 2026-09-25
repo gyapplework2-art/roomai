@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
+import { findCatalogProductsByVariantIds } from "@/lib/catalog/query";
+import type { CatalogCandidate } from "@/lib/catalog/schema";
 import { calculateEstimatedDesignCost, designSpecificationSchema } from "@/lib/designs/schema";
 import { createClient } from "@/lib/supabase/server";
 import type { Tables } from "@/types/database.types";
@@ -35,7 +37,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function ObjectList({ objects, type }: { objects: DesignObject[]; type: string }) {
+function ObjectList({
+  objects,
+  type,
+  catalogByVariantId,
+}: {
+  objects: DesignObject[];
+  type: string;
+  catalogByVariantId: Map<string, CatalogCandidate>;
+}) {
   const matchingObjects = objects.filter((object) => object.object_type === type);
 
   if (!matchingObjects.length) {
@@ -44,13 +54,53 @@ function ObjectList({ objects, type }: { objects: DesignObject[]; type: string }
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      {matchingObjects.map((object) => (
-        <article key={object.id} className="border border-slate-200 bg-slate-50 p-4">
-          <h3 className="font-medium text-slate-950">{object.name ?? object.category ?? "Unnamed object"}</h3>
-          {object.category && <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">{object.category}</p>}
-          {object.reasoning && <p className="mt-3 text-sm leading-6 text-slate-700">{object.reasoning}</p>}
-        </article>
-      ))}
+      {matchingObjects.map((object) => {
+        const catalogCandidate = object.catalog_product_variant_id
+          ? catalogByVariantId.get(object.catalog_product_variant_id)
+          : undefined;
+        if (!catalogCandidate) {
+          return (
+            <article key={object.id} className="border border-slate-200 bg-slate-50 p-4">
+              <h3 className="font-medium text-slate-950">{object.name ?? object.category ?? "Unnamed object"}</h3>
+              {object.category && <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">{object.category}</p>}
+              {object.reasoning && <p className="mt-3 text-sm leading-6 text-slate-700">{object.reasoning}</p>}
+            </article>
+          );
+        }
+        const catalogDimensions = catalogCandidate
+          && catalogCandidate.widthCm !== null
+          && catalogCandidate.depthCm !== null
+          && catalogCandidate.heightCm !== null
+          ? `${catalogCandidate.widthCm} × ${catalogCandidate.depthCm} × ${catalogCandidate.heightCm} cm`
+          : null;
+        const catalogPrice = catalogCandidate?.currency && catalogCandidate.roomaiSellingPrice !== null
+          ? formatMoney(catalogCandidate.currency, catalogCandidate.roomaiSellingPrice)
+          : null;
+
+        return (
+          <article key={object.id} className="border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h3 className="font-medium text-slate-950">{object.name ?? object.category ?? "Unnamed object"}</h3>
+                {object.category && <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">{object.category}</p>}
+              </div>
+              {catalogCandidate && <Badge variant="outline">Catalog matched</Badge>}
+            </div>
+            {object.reasoning && <p className="mt-3 text-sm leading-6 text-slate-700">{object.reasoning}</p>}
+            {catalogCandidate && (
+              <dl className="mt-4 grid gap-4 border-t border-slate-200 pt-4 sm:grid-cols-2">
+                <Detail label="RoomAI catalog price" value={catalogPrice} />
+                <Detail label="Material" value={catalogCandidate.normalizedMaterial} />
+                <Detail label="Color" value={catalogCandidate.normalizedColor} />
+                <Detail label="Style" value={catalogCandidate.normalizedStyle} />
+                <Detail label="Dimensions" value={catalogDimensions} />
+                <Detail label="Availability" value={catalogCandidate.normalizedAvailability} />
+                <Detail label="Delivery" value={catalogCandidate.deliveryText} />
+              </dl>
+            )}
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -77,7 +127,7 @@ export default async function DesignPage({
       .maybeSingle(),
     supabase
       .from("design_objects")
-      .select("id, design_id, object_type, category, name, x_cm, y_cm, z_cm, width_cm, depth_cm, height_cm, rotation_degrees, material, primary_color, product_id, reasoning, created_at")
+      .select("id, design_id, object_type, category, name, x_cm, y_cm, z_cm, width_cm, depth_cm, height_cm, rotation_degrees, material, primary_color, product_id, catalog_product_id, catalog_product_variant_id, reasoning, created_at")
       .eq("design_id", designId)
       .order("created_at", { ascending: true }),
   ]);
@@ -98,6 +148,27 @@ export default async function DesignPage({
 
   const specification = specificationResult.data;
   const objects = objectsResult.data as DesignObject[];
+  const catalogVariantIds = [
+    ...new Set(
+      objects
+        .map((object) => object.catalog_product_variant_id)
+        .filter((variantId): variantId is string => variantId !== null),
+    ),
+  ];
+  let catalogByVariantId = new Map<string, CatalogCandidate>();
+  if (catalogVariantIds.length > 0) {
+    try {
+      const catalogCandidates = await findCatalogProductsByVariantIds(catalogVariantIds);
+      catalogByVariantId = new Map(
+        catalogCandidates.map((candidate) => [candidate.variantId, candidate]),
+      );
+    } catch (error) {
+      console.error("RoomAI design catalog hydration failed", {
+        designId,
+        error: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+  }
   const estimatedCost = calculateEstimatedDesignCost(specification);
 
   return (
@@ -143,11 +214,11 @@ export default async function DesignPage({
           </Section>
 
           <Section title="Furniture">
-            <ObjectList objects={objects} type="furniture" />
+            <ObjectList objects={objects} type="furniture" catalogByVariantId={catalogByVariantId} />
           </Section>
 
           <Section title="Decorations">
-            <ObjectList objects={objects} type="decoration" />
+            <ObjectList objects={objects} type="decoration" catalogByVariantId={catalogByVariantId} />
           </Section>
 
           {specification.warnings.length > 0 && (
