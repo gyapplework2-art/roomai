@@ -39,7 +39,7 @@ test("resolves only supported furniture type aliases", () => {
   assert.equal(resolveFurnitureTypeCode("rug"), "area_rug");
   assert.equal(resolveFurnitureTypeCode(" Area   Rug "), "area_rug");
   assert.equal(resolveFurnitureTypeCode("area_rug"), "area_rug");
-  assert.equal(resolveFurnitureTypeCode("sofa"), null);
+  assert.equal(resolveFurnitureTypeCode("sofa"), "sofa");
 });
 
 test("deduplicates catalog candidates by variantId", () => {

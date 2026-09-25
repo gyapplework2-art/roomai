@@ -32,6 +32,7 @@ const FURNITURE_TYPE_ALIASES: Record<string, string> = {
   rug: "area_rug",
   "area rug": "area_rug",
   area_rug: "area_rug",
+  sofa: "sofa",
 };
 
 export function resolveFurnitureTypeCode(value: string): string | null {
