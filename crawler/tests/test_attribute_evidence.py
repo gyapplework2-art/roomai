@@ -77,3 +77,30 @@ def test_labeled_upholstery_color_beats_matching_url_evidence_and_preserves_both
     assert resolved.selected.source == "labeled_html"
     assert [candidate.value for candidate in resolved.candidates] == ["Charme Tan", "charme tan"]
     assert [candidate.source for candidate in resolved.candidates] == ["labeled_html", "vendor_url_slug"]
+
+
+def test_frame_prefixed_materials_do_not_override_url_upholstery_material():
+    candidates = variant_attribute_candidates(
+        None,
+        None,
+        {
+            "article_html_specifications": {
+                "Materials": "Frame: kiln-dried solid pine, rubberwood legs, plywood, MDF, steel hardware",
+            },
+        },
+        {
+            "material": [
+                {
+                    "value": "leather",
+                    "source": "vendor_url_slug",
+                    "method": "deterministic",
+                },
+            ],
+        },
+    )
+
+    resolved = resolve_attribute(candidates["material"])
+
+    assert resolved.selected is not None
+    assert resolved.selected.value == "leather"
+    assert resolved.selected.source == "vendor_url_slug"

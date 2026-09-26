@@ -59,7 +59,15 @@ def variant_attribute_candidates(
         if not isinstance(collection, dict):
             continue
         for label, value in collection.items():
-            concept = _LABEL_CONCEPTS.get(label.strip().casefold().rstrip(":").strip()) if isinstance(label, str) else None
+            normalized_label = label.strip().casefold().rstrip(":").strip() if isinstance(label, str) else None
+            concept = _LABEL_CONCEPTS.get(normalized_label) if normalized_label else None
+            if (
+                concept == "material"
+                and normalized_label == "materials"
+                and isinstance(value, str)
+                and value.strip().casefold().startswith("frame:")
+            ):
+                continue
             if concept and isinstance(value, str) and value.strip():
                 candidates[concept].append(AttributeCandidate(concept, value, "labeled_html", _PRIORITY["labeled_html"]))
     for concept in ("color", "material"):
