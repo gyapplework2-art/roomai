@@ -147,7 +147,7 @@ function rayDistanceToBoundary(
   return nearestDistance;
 }
 
-function getFreestandingLocalEnvelope(
+export function getFreestandingLocalEnvelope(
   point: { xCm: number; yCm: number },
   geometry: RoomGeometry,
   preferredOrientationDegrees: number | null,
