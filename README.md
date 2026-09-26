@@ -33,6 +33,19 @@
 - Optional deployment with [Supabase Vercel Integration and Vercel deploy](#deploy-your-own)
   - Environment variables automatically assigned to Vercel project
 
+## D.3A.12 Controlled Catalog Expansion Pipeline
+
+RoomAI's catalog expansion is a US-first, bounded pipeline:
+
+1. **12.1 Coverage Plan**: code-defined market and canonical furniture-type targets reuse `crawler/core/taxonomy.py`.
+2. **12.2 Controlled Batch Discovery**: discovery reads only explicitly approved source pages with bounded limits; it does not scrape search engines.
+3. **12.3 Batch Intake/Validation**: each candidate runs through the existing vendor adapter, extraction, normalization, validation, and persistence planning stages.
+4. **12.4 Deduplication/Controlled Persistence**: natural-key plans use the existing idempotent executor, with dry-run as the default and existing write guards preserved.
+5. **12.5 Controlled Promotion**: promotion remains a separate per-variant guarded action; review-required records are not published automatically.
+6. **12.6 Coverage Reporting**: pure deterministic reporting compares desired targets with eligible market/type inventory counts.
+
+Run `python3 -m crawler.jobs.expand_catalog plan --market US` for a local report. The pipeline is vendor/market isolated, uses bounded and manually approved discovery sources, and keeps vendor facts internal. It does not perform anti-bot or CAPTCHA bypass, automatic mass publication, or uncontrolled crawling. Design intelligence remains separate from crawler and catalog intake.
+
 ## Demo
 
 You can view a fully working demo at [demo-nextjs-with-supabase.vercel.app](https://demo-nextjs-with-supabase.vercel.app/).
