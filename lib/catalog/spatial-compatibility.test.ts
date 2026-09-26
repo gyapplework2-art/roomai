@@ -2,8 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import type { CatalogCandidate } from "@/lib/catalog/schema";
-import { evaluateCatalogReplacementSpatialCompatibility } from "@/lib/catalog/spatial-compatibility";
-import type { RoomGeometry } from "@/lib/geometry/types";
+import {
+  evaluateCatalogReplacementContextCompatibility,
+  evaluateCatalogReplacementSpatialCompatibility,
+} from "@/lib/catalog/spatial-compatibility";
+import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
 
 const geometry: RoomGeometry = {
   schemaVersion: "1.0",
@@ -34,7 +37,11 @@ const designObject = {
   rotation_degrees: 0,
 };
 
-function candidate(widthCm: number | null, depthCm: number | null): CatalogCandidate {
+function candidate(
+  widthCm: number | null,
+  depthCm: number | null,
+  overrides: Partial<CatalogCandidate> = {},
+): CatalogCandidate {
   return {
     productId: "product-1",
     variantId: "variant-1",
@@ -65,8 +72,33 @@ function candidate(widthCm: number | null, depthCm: number | null): CatalogCandi
     vendorName: "Vendor",
     productUrl: "https://example.com/product",
     primaryImageUrl: null,
+    ...overrides,
   };
 }
+
+const door: RoomOpening = {
+  id: "door-1",
+  openingType: "door",
+  wallSegmentId: "w1",
+  offsetCm: 160,
+  widthCm: 80,
+  heightCm: 210,
+  sillHeightCm: null,
+  hingeSide: "left",
+  swingDirection: "inward",
+};
+
+const windowOpening: RoomOpening = {
+  id: "window-1",
+  openingType: "window",
+  wallSegmentId: "w1",
+  offsetCm: 160,
+  widthCm: 80,
+  heightCm: 100,
+  sillHeightCm: 100,
+  hingeSide: null,
+  swingDirection: null,
+};
 
 test("same-size and smaller replacements fit the local room envelope", () => {
   const sameSize = evaluateCatalogReplacementSpatialCompatibility(
@@ -140,4 +172,115 @@ test("rotated placement uses rotated local width and depth axes", () => {
   assert.equal(result.status, "compatible");
   assert.ok(result.availableWidthCm !== null && Math.abs(result.availableWidthCm - 280) < 1e-6);
   assert.ok(result.availableDepthCm !== null && Math.abs(result.availableDepthCm - 380) < 1e-6);
+});
+
+test("candidate with no opening or neighbor conflict is compatible", () => {
+  const result = evaluateCatalogReplacementContextCompatibility(
+    "current",
+    designObject,
+    candidate(100, 60),
+    geometry,
+    [],
+    [],
+  );
+
+  assert.equal(result.status, "compatible");
+});
+
+test("candidate overlapping a neighbor is incompatible while edge touching is compatible", () => {
+  const overlapping = evaluateCatalogReplacementContextCompatibility(
+    "current",
+    designObject,
+    candidate(100, 60),
+    geometry,
+    [],
+    [{ id: "neighbor", x_cm: 240, y_cm: 150, width_cm: 100, depth_cm: 60, rotation_degrees: 0 }],
+  );
+  const touching = evaluateCatalogReplacementContextCompatibility(
+    "current",
+    designObject,
+    candidate(100, 60),
+    geometry,
+    [],
+    [{ id: "neighbor", x_cm: 300, y_cm: 150, width_cm: 100, depth_cm: 60, rotation_degrees: 0 }],
+  );
+
+  assert.equal(overlapping.status, "incompatible");
+  assert.deepEqual(overlapping.reasons, ["candidate_overlaps_neighbor"]);
+  assert.equal(touching.status, "compatible");
+});
+
+test("rotated candidate overlapping a rotated neighbor is incompatible", () => {
+  const result = evaluateCatalogReplacementContextCompatibility(
+    "current",
+    { ...designObject, rotation_degrees: 45 },
+    candidate(100, 40),
+    geometry,
+    [],
+    [{ id: "neighbor", x_cm: 235, y_cm: 150, width_cm: 100, depth_cm: 40, rotation_degrees: -45 }],
+  );
+
+  assert.equal(result.status, "incompatible");
+  assert.deepEqual(result.reasons, ["candidate_overlaps_neighbor"]);
+});
+
+test("candidate intruding into door clearance is incompatible and a clear candidate fits", () => {
+  const blocked = evaluateCatalogReplacementContextCompatibility(
+    "current",
+    { x_cm: 200, y_cm: 20, rotation_degrees: 0 },
+    candidate(80, 20),
+    geometry,
+    [door],
+    [],
+  );
+  const clear = evaluateCatalogReplacementContextCompatibility(
+    "current",
+    { x_cm: 200, y_cm: 50, rotation_degrees: 0 },
+    candidate(80, 20),
+    geometry,
+    [door],
+    [],
+  );
+
+  assert.equal(blocked.status, "incompatible");
+  assert.deepEqual(blocked.reasons, ["candidate_intersects_door_clearance"]);
+  assert.equal(clear.status, "compatible");
+});
+
+test("low furniture below a window sill fits while tall furniture blocks it", () => {
+  const placement = { x_cm: 200, y_cm: 10, rotation_degrees: 0 };
+  const low = evaluateCatalogReplacementContextCompatibility(
+    "current",
+    placement,
+    candidate(80, 20, { heightCm: 90 }),
+    geometry,
+    [windowOpening],
+    [],
+  );
+  const tall = evaluateCatalogReplacementContextCompatibility(
+    "current",
+    placement,
+    candidate(80, 20, { heightCm: 91 }),
+    geometry,
+    [windowOpening],
+    [],
+  );
+
+  assert.equal(low.status, "compatible");
+  assert.equal(tall.status, "incompatible");
+  assert.deepEqual(tall.reasons, ["candidate_blocks_window"]);
+});
+
+test("missing required window clearance data is unknown", () => {
+  const result = evaluateCatalogReplacementContextCompatibility(
+    "current",
+    { x_cm: 200, y_cm: 10, rotation_degrees: 0 },
+    candidate(80, 20, { heightCm: null }),
+    geometry,
+    [windowOpening],
+    [],
+  );
+
+  assert.equal(result.status, "unknown");
+  assert.deepEqual(result.reasons, ["window_clearance_unavailable"]);
 });

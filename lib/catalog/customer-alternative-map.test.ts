@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
+import type { AlternativeSuitabilityContext } from "@/lib/catalog/alternative-suitability";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
+import type { RoomGeometry } from "@/lib/geometry/types";
 
 function candidate(
   variantId: string,
@@ -39,6 +41,35 @@ function candidate(
     productUrl: "https://example.com/internal-product",
     primaryImageUrl: null,
     ...overrides,
+  };
+}
+
+const geometry: RoomGeometry = {
+  schemaVersion: "1.0",
+  shapeType: "rectangle",
+  templateTransform: { rotationDegrees: 0, mirroredHorizontal: false, mirroredVertical: false },
+  ceilingHeightCm: 250,
+  vertices: [
+    { id: "v1", xCm: 0, yCm: 0 },
+    { id: "v2", xCm: 500, yCm: 0 },
+    { id: "v3", xCm: 500, yCm: 400 },
+    { id: "v4", xCm: 0, yCm: 400 },
+  ],
+  wallSegments: [
+    { id: "w1", startVertexId: "v1", endVertexId: "v2" },
+    { id: "w2", startVertexId: "v2", endVertexId: "v3" },
+    { id: "w3", startVertexId: "v3", endVertexId: "v4" },
+    { id: "w4", startVertexId: "v4", endVertexId: "v1" },
+  ],
+};
+
+function suitabilityContext(): AlternativeSuitabilityContext {
+  return {
+    currentObjectId: "current-object",
+    designObject: { x_cm: 250, y_cm: 200, rotation_degrees: 0 },
+    geometry,
+    openings: [],
+    neighbors: [],
   };
 }
 
@@ -122,6 +153,35 @@ test("returns an empty alternative list when no substitute exists", () => {
     [current],
     [current],
     4,
+  );
+
+  assert.deepEqual(result.get("current"), []);
+});
+
+test("context-aware customer map excludes spatially incompatible alternatives", () => {
+  const current = candidate("current");
+  const oversized = candidate("oversized", { widthCm: 490 });
+  const contexts = new Map([[current.variantId, suitabilityContext()]]);
+
+  const result = buildCustomerAlternativeMap(
+    [current],
+    [current, oversized],
+    4,
+    contexts,
+  );
+
+  assert.deepEqual(result.get("current"), []);
+});
+
+test("context-aware customer map excludes alternatives when spatial context is unavailable", () => {
+  const current = candidate("current");
+  const alternative = candidate("alternative");
+
+  const result = buildCustomerAlternativeMap(
+    [current],
+    [current, alternative],
+    4,
+    new Map(),
   );
 
   assert.deepEqual(result.get("current"), []);

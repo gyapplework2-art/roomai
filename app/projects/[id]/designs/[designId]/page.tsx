@@ -5,19 +5,43 @@ import { Badge } from "@/components/ui/badge";
 import type { RoomAIAlternative } from "@/lib/catalog/customer-alternative";
 import { buildCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
 import { toRoomAIProduct } from "@/lib/catalog/customer-product";
+import type { AlternativeSuitabilityContext } from "@/lib/catalog/alternative-suitability";
 import {
   findCatalogProductsByVariantIds,
   findCatalogProductsForAlternativeContexts,
 } from "@/lib/catalog/query";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
 import { calculateEstimatedDesignCost, designSpecificationSchema } from "@/lib/designs/schema";
+import { validateRoomOpenings } from "@/lib/geometry/openings";
+import { roomGeometrySchema, roomOpeningSchema } from "@/lib/geometry/schema";
+import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
+import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
 import { createClient } from "@/lib/supabase/server";
-import type { Tables } from "@/types/database.types";
+import type { Json, Tables } from "@/types/database.types";
 
 type Design = Tables<"designs">;
 type DesignObject = Tables<"design_objects">;
+type GeometryRow = Tables<"room_geometries">;
 
 export const instant = false;
+
+function parseGeometry(row: GeometryRow): RoomGeometry | null {
+  const result = roomGeometrySchema.safeParse({
+    schemaVersion: row.schema_version,
+    shapeType: row.shape_type,
+    templateTransform: {
+      rotationDegrees: row.template_rotation_degrees,
+      mirroredHorizontal: row.template_mirrored_horizontal,
+      mirroredVertical: row.template_mirrored_vertical,
+    },
+    ceilingHeightCm: row.ceiling_height_cm,
+    vertices: row.vertices as Json,
+    wallSegments: row.wall_segments as Json,
+  });
+  return result.success && validateRoomGeometryStructure(result.data).valid
+    ? result.data
+    : null;
+}
 
 function formatMoney(currency: string, value: number) {
   return `${currency} ${value.toFixed(2)}`;
@@ -182,7 +206,7 @@ export default async function DesignPage({
   }
 
   const { id: projectId, designId } = await params;
-  const [designResult, objectsResult] = await Promise.all([
+  const [designResult, objectsResult, geometryResult, openingsResult] = await Promise.all([
     supabase
       .from("designs")
       .select("id, project_id, version, status, design_name, summary, design_specification, model_provider, model_name, prompt_version, generation_started_at, generation_completed_at, created_at")
@@ -193,6 +217,15 @@ export default async function DesignPage({
       .from("design_objects")
       .select("id, design_id, object_type, category, name, x_cm, y_cm, z_cm, width_cm, depth_cm, height_cm, rotation_degrees, material, primary_color, product_id, catalog_product_id, catalog_product_variant_id, reasoning, created_at")
       .eq("design_id", designId)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("room_geometries")
+      .select("id, project_id, schema_version, shape_type, template_rotation_degrees, template_mirrored_horizontal, template_mirrored_vertical, vertices, wall_segments, ceiling_height_cm, created_at, updated_at")
+      .eq("project_id", projectId)
+      .maybeSingle(),
+    supabase
+      .from("room_openings")
+      .select("id, room_geometry_id, opening_type, wall_segment_id, offset_cm, width_cm, height_cm, sill_height_cm, hinge_side, swing_direction, created_at, updated_at")
       .order("created_at", { ascending: true }),
   ]);
 
@@ -233,12 +266,57 @@ export default async function DesignPage({
       });
     }
   }
+  const storedGeometry = !geometryResult.error && geometryResult.data
+    ? parseGeometry(geometryResult.data as GeometryRow)
+    : null;
+  const relevantOpeningRows = storedGeometry && geometryResult.data && !openingsResult.error
+    ? (openingsResult.data ?? []).filter((opening) => opening.room_geometry_id === geometryResult.data?.id)
+    : [];
+  const parsedOpenings = relevantOpeningRows.map((opening) => roomOpeningSchema.safeParse({
+    id: opening.id,
+    openingType: opening.opening_type,
+    wallSegmentId: opening.wall_segment_id,
+    offsetCm: opening.offset_cm,
+    widthCm: opening.width_cm,
+    heightCm: opening.height_cm,
+    sillHeightCm: opening.sill_height_cm,
+    hingeSide: opening.hinge_side,
+    swingDirection: opening.swing_direction,
+  }));
+  const storedOpenings: RoomOpening[] = parsedOpenings.flatMap((result) => result.success ? [result.data] : []);
+  const validOpenings = storedGeometry
+    && parsedOpenings.every((result) => result.success)
+    && validateRoomOpenings(storedGeometry, storedOpenings).valid
+    ? storedOpenings
+    : null;
+  const suitabilityContextsByVariantId = new Map<string, AlternativeSuitabilityContext>();
+  if (storedGeometry && validOpenings && !openingsResult.error) {
+    for (const object of objects) {
+      if (!object.catalog_product_variant_id) continue;
+      suitabilityContextsByVariantId.set(object.catalog_product_variant_id, {
+        currentObjectId: object.id,
+        designObject: {
+          x_cm: object.x_cm,
+          y_cm: object.y_cm,
+          rotation_degrees: object.rotation_degrees,
+        },
+        geometry: storedGeometry,
+        openings: validOpenings,
+        neighbors: objects,
+      });
+    }
+  }
   let alternativesByVariantId = new Map<string, RoomAIAlternative[]>();
   if (catalogByVariantId.size > 0) {
     try {
       const currentCatalogCandidates = [...catalogByVariantId.values()];
       const candidatePool = await findCatalogProductsForAlternativeContexts(currentCatalogCandidates);
-      alternativesByVariantId = buildCustomerAlternativeMap(currentCatalogCandidates, candidatePool, 4);
+      alternativesByVariantId = buildCustomerAlternativeMap(
+        currentCatalogCandidates,
+        candidatePool,
+        4,
+        suitabilityContextsByVariantId,
+      );
     } catch (error) {
       console.error("RoomAI design alternative hydration failed", {
         designId,
