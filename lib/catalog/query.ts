@@ -184,3 +184,80 @@ export async function findCatalogProductsByVariantIds(
   }
 }
 
+
+export async function findCatalogProductsForAlternativeContexts(
+  currents: CatalogCandidate[],
+): Promise<CatalogCandidate[]> {
+  const contexts = [
+    ...new Map(
+      currents
+        .filter(
+          (candidate) =>
+            candidate.countryCode.trim() !== "" &&
+            candidate.furnitureTypeCode !== null &&
+            candidate.furnitureTypeCode.trim() !== "",
+        )
+        .map((candidate) => [
+          `${candidate.countryCode}::${candidate.furnitureTypeCode}`,
+          {
+            countryCode: candidate.countryCode,
+            furnitureTypeCode: candidate.furnitureTypeCode!,
+          },
+        ]),
+    ).values(),
+  ];
+
+  if (contexts.length === 0) {
+    return [];
+  }
+
+  const supabase = createCatalogClient();
+
+  const countryCodes = [...new Set(contexts.map((context) => context.countryCode))];
+  const furnitureTypeCodes = [
+    ...new Set(contexts.map((context) => context.furnitureTypeCode)),
+  ];
+
+  const { data, error } = await supabase
+    .from(PUBLIC_CATALOG_VIEW)
+    .select(
+      "product_id,variant_id,country_code,category_code,category_name,furniture_type_code,furniture_type_name,product_title,roomai_description,normalized_color,normalized_material,normalized_style,configuration,seating_capacity,width_cm,depth_cm,height_cm,weight_kg,currency,roomai_selling_price,normalized_availability,delivery_text,estimated_delivery_days_min,estimated_delivery_days_max,vendor_data_checked_at,roomai_price_calculated_at,vendor_name,product_url,primary_image_url",
+    )
+    .in("country_code", countryCodes)
+    .in("furniture_type_code", furnitureTypeCodes)
+    .limit(500);
+
+  if (error) {
+    console.error("Catalog alternative context lookup failed", {
+      code: error.code,
+      message: error.message,
+    });
+    throw new CatalogQueryError();
+  }
+
+  try {
+    const validContextKeys = new Set(
+      contexts.map(
+        (context) => `${context.countryCode}::${context.furnitureTypeCode}`,
+      ),
+    );
+
+    return (data as CatalogViewRow[])
+      .map(toCandidate)
+      .filter(
+        (candidate) =>
+          candidate.furnitureTypeCode !== null &&
+          validContextKeys.has(
+            `${candidate.countryCode}::${candidate.furnitureTypeCode}`,
+          ),
+      );
+  } catch (error) {
+    console.error("Catalog alternative context validation failed", {
+      message:
+        error instanceof Error
+          ? error.message
+          : "Unknown catalog result error",
+    });
+    throw new CatalogQueryError("Catalog result validation failed.");
+  }
+}

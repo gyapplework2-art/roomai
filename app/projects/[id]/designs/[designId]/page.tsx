@@ -2,8 +2,13 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
+import type { RoomAIAlternative } from "@/lib/catalog/customer-alternative";
+import { buildCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
 import { toRoomAIProduct } from "@/lib/catalog/customer-product";
-import { findCatalogProductsByVariantIds } from "@/lib/catalog/query";
+import {
+  findCatalogProductsByVariantIds,
+  findCatalogProductsForAlternativeContexts,
+} from "@/lib/catalog/query";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
 import { calculateEstimatedDesignCost, designSpecificationSchema } from "@/lib/designs/schema";
 import { createClient } from "@/lib/supabase/server";
@@ -42,10 +47,12 @@ function ObjectList({
   objects,
   type,
   catalogByVariantId,
+  alternativesByVariantId,
 }: {
   objects: DesignObject[];
   type: string;
   catalogByVariantId: Map<string, CatalogCandidate>;
+  alternativesByVariantId: Map<string, RoomAIAlternative[]>;
 }) {
   const matchingObjects = objects.filter((object) => object.object_type === type);
 
@@ -69,6 +76,7 @@ function ObjectList({
           );
         }
         const roomAIProduct = toRoomAIProduct(catalogCandidate);
+        const alternatives = alternativesByVariantId.get(catalogCandidate.variantId) ?? [];
         const catalogDimensions = roomAIProduct.dimensions.widthCm !== null
           && roomAIProduct.dimensions.depthCm !== null
           && roomAIProduct.dimensions.heightCm !== null
@@ -114,6 +122,45 @@ function ObjectList({
                 <Detail label="Availability" value={roomAIProduct.availability.status} />
                 <Detail label="Delivery" value={roomAIProduct.availability.deliveryText} />
               </dl>
+              {alternatives.length > 0 && (
+                <section className="mt-5 border-t border-slate-200 pt-5">
+                  <h4 className="text-sm font-semibold text-slate-950">RoomAI alternatives</h4>
+                  <p className="mt-1 text-sm text-slate-600">Similar options selected for this design.</p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {alternatives.map(({ product }, index) => {
+                      const alternativePrice = product.price.currency && product.price.amount !== null
+                        ? formatMoney(product.price.currency, product.price.amount)
+                        : null;
+                      const alternativeDimensions = product.dimensions.widthCm !== null
+                        && product.dimensions.depthCm !== null
+                        && product.dimensions.heightCm !== null
+                        ? `${product.dimensions.widthCm} × ${product.dimensions.depthCm} × ${product.dimensions.heightCm} cm`
+                        : null;
+
+                      return (
+                        <article key={`${product.name}-${index}`} className="overflow-hidden border border-slate-200 bg-white">
+                          {product.imageUrl && (
+                            <div className="aspect-[4/3] w-full overflow-hidden bg-slate-50">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
+                            </div>
+                          )}
+                          <div className="p-3">
+                            <h5 className="text-sm font-semibold text-slate-950">{product.name}</h5>
+                            {alternativePrice && <p className="mt-1 text-sm font-medium text-emerald-700">{alternativePrice}</p>}
+                            <dl className="mt-3 grid gap-3">
+                              <Detail label="Material" value={product.material} />
+                              <Detail label="Color" value={product.color} />
+                              <Detail label="Style" value={product.style} />
+                              <Detail label="Dimensions" value={alternativeDimensions} />
+                            </dl>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
             </div>
           </article>
         );
@@ -186,6 +233,19 @@ export default async function DesignPage({
       });
     }
   }
+  let alternativesByVariantId = new Map<string, RoomAIAlternative[]>();
+  if (catalogByVariantId.size > 0) {
+    try {
+      const currentCatalogCandidates = [...catalogByVariantId.values()];
+      const candidatePool = await findCatalogProductsForAlternativeContexts(currentCatalogCandidates);
+      alternativesByVariantId = buildCustomerAlternativeMap(currentCatalogCandidates, candidatePool, 4);
+    } catch (error) {
+      console.error("RoomAI design alternative hydration failed", {
+        designId,
+        error: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+  }
   const estimatedCost = calculateEstimatedDesignCost(specification);
 
   return (
@@ -231,11 +291,21 @@ export default async function DesignPage({
           </Section>
 
           <Section title="Furniture">
-            <ObjectList objects={objects} type="furniture" catalogByVariantId={catalogByVariantId} />
+            <ObjectList
+              objects={objects}
+              type="furniture"
+              catalogByVariantId={catalogByVariantId}
+              alternativesByVariantId={alternativesByVariantId}
+            />
           </Section>
 
           <Section title="Decorations">
-            <ObjectList objects={objects} type="decoration" catalogByVariantId={catalogByVariantId} />
+            <ObjectList
+              objects={objects}
+              type="decoration"
+              catalogByVariantId={catalogByVariantId}
+              alternativesByVariantId={alternativesByVariantId}
+            />
           </Section>
 
           {specification.warnings.length > 0 && (
