@@ -154,6 +154,16 @@ def test_sofa_with_chaise_refinement_still_overrides_broad_sofa_category():
     assert result.product.needs_taxonomy_review is False
 
 
+def test_corner_sectional_refines_broad_sofa_category():
+    result = normalize_product(
+        _product(name='Timber 93" Corner Sectional - Olio Green', category="Sofas")
+    )
+
+    assert result.product.canonical_furniture_type_code == "sectional_sofa"
+    assert result.product.needs_taxonomy_review is False
+    assert "taxonomy_review" not in result.review_reasons
+
+
 def test_unknown_taxonomy_remains_unresolved_and_requires_review():
     product = _product(
         name="Mystery Relaxation Furniture",

@@ -184,6 +184,7 @@ SPECIFIC_NAME_RULES: tuple[tuple[str, str], ...] = (
     ("sofa with chaise", "sofa_with_chaise"),
     ("sofa w chaise", "sofa_with_chaise"),
     ("sectional sofa", "sectional_sofa"),
+    ("corner sectional", "sectional_sofa"),
     ("floor lamp", "floor_lamp"),
     ("table lamp", "table_lamp"),
     ("pendant lamp", "pendant_chandelier"),
@@ -239,7 +240,14 @@ def resolve_furniture_type(product: CatalogProduct) -> TaxonomyResolution:
 
         if (
             structured_resolution is None
-            or (structured_resolution[0] in {"sofa", "sectional_sofa"} and name_code == "sofa_with_chaise")
+            or (
+                structured_resolution[0] == "sofa"
+                and name_code in {"sectional_sofa", "sofa_with_chaise"}
+            )
+            or (
+                structured_resolution[0] == "sectional_sofa"
+                and name_code == "sofa_with_chaise"
+            )
             or (_normalize_text(product.source_category) == "lighting" and name_code in {"floor_lamp", "table_lamp", "pendant_chandelier"})
         ):
             return TaxonomyResolution(
