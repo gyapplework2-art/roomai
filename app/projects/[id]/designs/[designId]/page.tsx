@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
+import { toRoomAIProduct } from "@/lib/catalog/customer-product";
 import { findCatalogProductsByVariantIds } from "@/lib/catalog/query";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
 import { calculateEstimatedDesignCost, designSpecificationSchema } from "@/lib/designs/schema";
@@ -67,25 +68,25 @@ function ObjectList({
             </article>
           );
         }
-        const catalogDimensions = catalogCandidate
-          && catalogCandidate.widthCm !== null
-          && catalogCandidate.depthCm !== null
-          && catalogCandidate.heightCm !== null
-          ? `${catalogCandidate.widthCm} × ${catalogCandidate.depthCm} × ${catalogCandidate.heightCm} cm`
+        const roomAIProduct = toRoomAIProduct(catalogCandidate);
+        const catalogDimensions = roomAIProduct.dimensions.widthCm !== null
+          && roomAIProduct.dimensions.depthCm !== null
+          && roomAIProduct.dimensions.heightCm !== null
+          ? `${roomAIProduct.dimensions.widthCm} × ${roomAIProduct.dimensions.depthCm} × ${roomAIProduct.dimensions.heightCm} cm`
           : null;
-        const catalogPrice = catalogCandidate?.currency && catalogCandidate.roomaiSellingPrice !== null
-          ? formatMoney(catalogCandidate.currency, catalogCandidate.roomaiSellingPrice)
+        const catalogPrice = roomAIProduct.price.currency && roomAIProduct.price.amount !== null
+          ? formatMoney(roomAIProduct.price.currency, roomAIProduct.price.amount)
           : null;
         const designObjectName = object.name ?? object.category ?? "Unnamed object";
-        const imageAlt = catalogCandidate.productTitle ?? designObjectName;
+        const imageAlt = roomAIProduct.name || designObjectName;
 
         return (
           <article key={object.id} className="overflow-hidden border border-slate-200 bg-slate-50">
-            {catalogCandidate.primaryImageUrl && (
+            {roomAIProduct.imageUrl && (
               <div className="aspect-[4/3] w-full overflow-hidden bg-white">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={catalogCandidate.primaryImageUrl}
+                  src={roomAIProduct.imageUrl}
                   alt={imageAlt}
                   className="h-full w-full object-cover"
                 />
@@ -94,8 +95,9 @@ function ObjectList({
             <div className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
+                  {/* Temporary development diagnostics; vendor/link are not part of the production RoomAI customer contract. */}
                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{catalogCandidate.vendorName}</p>
-                  <h3 className="mt-1 text-lg font-semibold text-slate-950">{catalogCandidate.productTitle ?? designObjectName}</h3>
+                  <h3 className="mt-1 text-lg font-semibold text-slate-950">{roomAIProduct.name}</h3>
                 </div>
                 <Badge variant="outline">Catalog matched</Badge>
               </div>
@@ -107,13 +109,14 @@ function ObjectList({
               {object.reasoning && <p className="mt-3 text-sm leading-6 text-slate-700">{object.reasoning}</p>}
               <dl className="mt-4 grid gap-4 border-t border-slate-200 pt-4 sm:grid-cols-2">
                 <Detail label="RoomAI catalog price" value={catalogPrice} />
-                <Detail label="Material" value={catalogCandidate.normalizedMaterial} />
-                <Detail label="Color" value={catalogCandidate.normalizedColor} />
-                <Detail label="Style" value={catalogCandidate.normalizedStyle} />
+                <Detail label="Material" value={roomAIProduct.material} />
+                <Detail label="Color" value={roomAIProduct.color} />
+                <Detail label="Style" value={roomAIProduct.style} />
                 <Detail label="Dimensions" value={catalogDimensions} />
-                <Detail label="Availability" value={catalogCandidate.normalizedAvailability} />
-                <Detail label="Delivery" value={catalogCandidate.deliveryText} />
+                <Detail label="Availability" value={roomAIProduct.availability.status} />
+                <Detail label="Delivery" value={roomAIProduct.availability.deliveryText} />
               </dl>
+              {/* Temporary development diagnostics; vendor/link are not part of the production RoomAI customer contract. */}
               <a
                 href={catalogCandidate.productUrl}
                 target="_blank"
