@@ -7,6 +7,7 @@ from pathlib import Path
 
 from crawler.core.catalog_batch import intake_candidates, persist_batch, promote_batch
 from crawler.core.catalog_coverage import US_INITIAL_COVERAGE_PLAN, build_coverage_report
+from crawler.core.catalog_inventory import HttpxCatalogInventoryTransport, load_inventory_counts
 from crawler.core.config import get_settings
 from crawler.core.fetcher import HttpFetcher
 from crawler.core.supabase_repository import HttpxPostgrestTransport, SupabaseCatalogExecutor
@@ -30,6 +31,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--inventory", type=Path, help="JSON object of market/type counts for plan reporting.")
+    parser.add_argument(
+        "--live-inventory",
+        action="store_true",
+        help="Read active catalog inventory from Supabase for plan reporting.",
+    )
     parser.add_argument("--variant-id", action="append", default=[])
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument("--execute", action="store_true", help="Request writes; existing environment write guards still apply.")
@@ -79,6 +85,22 @@ def _plan_document(inventory_path: Path | None) -> dict[str, object]:
 async def run(args: argparse.Namespace) -> dict[str, object]:
     _validate_limit(args.limit)
     if args.stage == "plan":
+        if args.inventory is not None and args.live_inventory:
+            raise ValueError("--inventory and --live-inventory cannot be used together.")
+
+        if args.live_inventory:
+            counts = await load_inventory_counts(HttpxCatalogInventoryTransport())
+            report = build_coverage_report(US_INITIAL_COVERAGE_PLAN, counts)
+            document = {
+                "stage": "plan",
+                "targets": [target.__dict__ for target in US_INITIAL_COVERAGE_PLAN.targets],
+                "coverage": {
+                    "rows": [row.__dict__ for row in report.rows],
+                    "summary": report.summary.__dict__,
+                },
+            }
+            return _write(document, args.output)
+
         return _write(_plan_document(args.inventory), args.output)
 
     if args.stage == "discover":
