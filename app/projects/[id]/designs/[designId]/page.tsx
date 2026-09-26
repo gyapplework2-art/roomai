@@ -95,8 +95,6 @@ function ObjectList({
             <div className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  {/* Temporary development diagnostics; vendor/link are not part of the production RoomAI customer contract. */}
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{catalogCandidate.vendorName}</p>
                   <h3 className="mt-1 text-lg font-semibold text-slate-950">{roomAIProduct.name}</h3>
                 </div>
                 <Badge variant="outline">Catalog matched</Badge>
@@ -116,15 +114,6 @@ function ObjectList({
                 <Detail label="Availability" value={roomAIProduct.availability.status} />
                 <Detail label="Delivery" value={roomAIProduct.availability.deliveryText} />
               </dl>
-              {/* Temporary development diagnostics; vendor/link are not part of the production RoomAI customer contract. */}
-              <a
-                href={catalogCandidate.productUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-5 inline-flex text-sm font-semibold text-emerald-700 underline-offset-4 hover:underline"
-              >
-                View product
-              </a>
             </div>
           </article>
         );
