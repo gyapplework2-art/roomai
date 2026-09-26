@@ -127,6 +127,62 @@ export type Database = {
           },
         ]
       }
+      design_visualizations: {
+        Row: {
+          created_at: string
+          design_id: string
+          error_code: string | null
+          error_message: string | null
+          generation_completed_at: string | null
+          generation_started_at: string
+          id: string
+          model_name: string | null
+          model_provider: string | null
+          prompt_version: string | null
+          status: string
+          storage_bucket: string | null
+          storage_path: string | null
+        }
+        Insert: {
+          created_at?: string
+          design_id: string
+          error_code?: string | null
+          error_message?: string | null
+          generation_completed_at?: string | null
+          generation_started_at?: string
+          id?: string
+          model_name?: string | null
+          model_provider?: string | null
+          prompt_version?: string | null
+          status?: string
+          storage_bucket?: string | null
+          storage_path?: string | null
+        }
+        Update: {
+          created_at?: string
+          design_id?: string
+          error_code?: string | null
+          error_message?: string | null
+          generation_completed_at?: string | null
+          generation_started_at?: string
+          id?: string
+          model_name?: string | null
+          model_provider?: string | null
+          prompt_version?: string | null
+          status?: string
+          storage_bucket?: string | null
+          storage_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_visualizations_design_id_fkey"
+            columns: ["design_id"]
+            isOneToOne: false
+            referencedRelation: "designs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       designs: {
         Row: {
           created_at: string

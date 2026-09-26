@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
+import { VisualizationSubmitButton } from "@/components/visualization-submit-button";
 import type { RoomAIAlternative } from "@/lib/catalog/customer-alternative";
 import { buildCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
 import { toRoomAIProduct } from "@/lib/catalog/customer-product";
@@ -13,6 +14,7 @@ import {
 import type { CatalogCandidate } from "@/lib/catalog/schema";
 import { calculateEstimatedDesignCost, designSpecificationSchema } from "@/lib/designs/schema";
 import { replaceFurnitureAction } from "@/lib/designs/replacement-actions";
+import { generateDesignVisualizationAction } from "@/lib/designs/visualization-actions";
 import { validateRoomOpenings } from "@/lib/geometry/openings";
 import { roomGeometrySchema, roomOpeningSchema } from "@/lib/geometry/schema";
 import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
@@ -215,8 +217,10 @@ function ObjectList({
 
 export default async function DesignPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; designId: string }>;
+  searchParams: Promise<{ visualizationError?: string }>;
 }) {
   const supabase = await createClient();
   const { data: claims, error: claimsError } = await supabase.auth.getClaims();
@@ -226,7 +230,7 @@ export default async function DesignPage({
   }
 
   const { id: projectId, designId } = await params;
-  const [designResult, objectsResult, geometryResult, openingsResult] = await Promise.all([
+  const [designResult, objectsResult, geometryResult, openingsResult, visualizationResult] = await Promise.all([
     supabase
       .from("designs")
       .select("id, project_id, version, status, design_name, summary, design_specification, model_provider, model_name, prompt_version, generation_started_at, generation_completed_at, created_at")
@@ -247,6 +251,14 @@ export default async function DesignPage({
       .from("room_openings")
       .select("id, room_geometry_id, opening_type, wall_segment_id, offset_cm, width_cm, height_cm, sill_height_cm, hinge_side, swing_direction, created_at, updated_at")
       .order("created_at", { ascending: true }),
+    supabase
+      .from("design_visualizations")
+      .select("id, storage_bucket, storage_path, created_at")
+      .eq("design_id", designId)
+      .eq("status", "generated")
+      .order("generation_completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   if (designResult.error || !designResult.data || objectsResult.error) {
@@ -347,6 +359,15 @@ export default async function DesignPage({
     }
   }
   const estimatedCost = calculateEstimatedDesignCost(specification);
+  const visualization = !visualizationResult.error ? visualizationResult.data : null;
+  let visualizationUrl: string | null = null;
+  if (visualization?.storage_bucket && visualization.storage_path) {
+    const { data, error } = await supabase.storage
+      .from(visualization.storage_bucket)
+      .createSignedUrl(visualization.storage_path, 60 * 60);
+    if (!error) visualizationUrl = data.signedUrl;
+  }
+  const { visualizationError } = await searchParams;
 
   return (
     <main className="min-h-screen bg-[#f7f7f4] text-slate-950">
@@ -372,6 +393,38 @@ export default async function DesignPage({
         </div>
 
         <div className="mt-8 border border-slate-200 bg-white p-6 shadow-[0_12px_30px_rgba(15,23,42,0.04)] sm:p-10">
+          <Section title="Room visualization">
+            {visualizationError && (
+              <p className="mb-4 border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                The visualization could not be generated. Your saved design is unchanged.
+              </p>
+            )}
+            {visualizationUrl ? (
+              <div>
+                <div className="aspect-[3/2] overflow-hidden bg-slate-100">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={visualizationUrl}
+                    alt={`Room visualization for ${design.design_name ?? specification.designName}`}
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+                <p className="mt-3 text-sm leading-6 text-slate-600">
+                  A visual interpretation of the saved design. The validated specification remains authoritative.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm leading-6 text-slate-600">
+                Generate a visual interpretation of this saved design and its selected furniture.
+              </p>
+            )}
+            <form action={generateDesignVisualizationAction} className="mt-5">
+              <input type="hidden" name="projectId" value={projectId} />
+              <input type="hidden" name="designId" value={designId} />
+              <VisualizationSubmitButton hasVisualization={visualizationUrl !== null} />
+            </form>
+          </Section>
+
           <Section title="Overview">
             <dl className="grid gap-6 sm:grid-cols-3">
               <Detail label="Estimated total" value={formatMoney(specification.budget.currency, estimatedCost)} />
