@@ -6,7 +6,11 @@ import json
 from pathlib import Path
 
 from crawler.core.catalog_batch import intake_candidates, persist_batch, promote_batch
-from crawler.core.catalog_coverage import US_INITIAL_COVERAGE_PLAN, build_coverage_report
+from crawler.core.catalog_coverage import (
+    US_INITIAL_COVERAGE_PLAN,
+    build_coverage_report,
+    select_expansion_targets,
+)
 from crawler.core.catalog_inventory import HttpxCatalogInventoryTransport, load_inventory_counts
 from crawler.core.config import get_settings
 from crawler.core.fetcher import HttpFetcher
@@ -62,8 +66,32 @@ def _write(document: dict[str, object], output: Path | None) -> dict[str, object
     return document
 
 
-def _plan_document(inventory_path: Path | None) -> dict[str, object]:
+def _coverage_document(
+    counts: dict[tuple[str, str], int],
+    *,
+    limit: int,
+) -> dict[str, object]:
+    report = build_coverage_report(US_INITIAL_COVERAGE_PLAN, counts)
+    expansion_targets = select_expansion_targets(report, limit=limit)
+
+    return {
+        "stage": "plan",
+        "targets": [target.__dict__ for target in US_INITIAL_COVERAGE_PLAN.targets],
+        "coverage": {
+            "rows": [row.__dict__ for row in report.rows],
+            "summary": report.summary.__dict__,
+            "expansion_targets": [row.__dict__ for row in expansion_targets],
+        },
+    }
+
+
+def _plan_document(
+    inventory_path: Path | None,
+    *,
+    limit: int,
+) -> dict[str, object]:
     counts: dict[tuple[str, str], int] = {}
+
     if inventory_path:
         raw = json.loads(inventory_path.read_text())
         if isinstance(raw, dict):
@@ -71,15 +99,8 @@ def _plan_document(inventory_path: Path | None) -> dict[str, object]:
                 if isinstance(key, str) and ":" in key and isinstance(value, int):
                     market, furniture_type = key.split(":", 1)
                     counts[(market, furniture_type)] = value
-    report = build_coverage_report(US_INITIAL_COVERAGE_PLAN, counts)
-    return {
-        "stage": "plan",
-        "targets": [target.__dict__ for target in US_INITIAL_COVERAGE_PLAN.targets],
-        "coverage": {
-            "rows": [row.__dict__ for row in report.rows],
-            "summary": report.summary.__dict__,
-        },
-    }
+
+    return _coverage_document(counts, limit=limit)
 
 
 async def run(args: argparse.Namespace) -> dict[str, object]:
@@ -90,18 +111,15 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
 
         if args.live_inventory:
             counts = await load_inventory_counts(HttpxCatalogInventoryTransport())
-            report = build_coverage_report(US_INITIAL_COVERAGE_PLAN, counts)
-            document = {
-                "stage": "plan",
-                "targets": [target.__dict__ for target in US_INITIAL_COVERAGE_PLAN.targets],
-                "coverage": {
-                    "rows": [row.__dict__ for row in report.rows],
-                    "summary": report.summary.__dict__,
-                },
-            }
-            return _write(document, args.output)
+            return _write(
+                _coverage_document(counts, limit=args.limit),
+                args.output,
+            )
 
-        return _write(_plan_document(args.inventory), args.output)
+        return _write(
+            _plan_document(args.inventory, limit=args.limit),
+            args.output,
+        )
 
     if args.stage == "discover":
         if args.vendor != "article" or args.market != "US" or args.category != "sofas":

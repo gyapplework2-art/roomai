@@ -140,3 +140,86 @@ def test_parse_args_accepts_live_inventory(monkeypatch):
     assert args.market == "US"
     assert args.live_inventory is True
     assert args.inventory is None
+
+
+def test_plan_exposes_bounded_expansion_targets():
+    document = run(
+        expand_catalog.run(
+            make_args(limit=3)
+        )
+    )
+
+    targets = document["coverage"]["expansion_targets"]
+
+    assert len(targets) == 3
+    assert [
+        target["furniture_type_code"]
+        for target in targets
+    ] == [
+        "accent_chair",
+        "area_rug",
+        "bed_frame",
+    ]
+    assert all(target["priority"] == "critical" for target in targets)
+    assert all(target["status"] == "empty" for target in targets)
+
+
+def test_live_inventory_expansion_targets_reflect_current_counts(monkeypatch):
+    class FakeInventoryTransport:
+        pass
+
+    async def fake_load_inventory_counts(transport):
+        assert isinstance(transport, FakeInventoryTransport)
+        return {
+            ("US", "sofa"): 3,
+            ("US", "sectional_sofa"): 1,
+            ("US", "area_rug"): 1,
+        }
+
+    monkeypatch.setattr(
+        expand_catalog,
+        "HttpxCatalogInventoryTransport",
+        FakeInventoryTransport,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        expand_catalog,
+        "load_inventory_counts",
+        fake_load_inventory_counts,
+        raising=False,
+    )
+
+    document = run(
+        expand_catalog.run(
+            make_args(
+                live_inventory=True,
+                limit=11,
+            )
+        )
+    )
+
+    targets = document["coverage"]["expansion_targets"]
+
+    assert [
+        target["furniture_type_code"]
+        for target in targets
+    ] == [
+        "accent_chair",
+        "bed_frame",
+        "coffee_table",
+        "desk",
+        "dining_chair",
+        "dining_table",
+        "office_chair",
+        "sofa_with_chaise",
+        "area_rug",
+        "sectional_sofa",
+        "sofa",
+    ]
+
+    assert targets[8]["actual_product_count"] == 1
+    assert targets[8]["status"] == "under_target"
+    assert targets[9]["actual_product_count"] == 1
+    assert targets[9]["status"] == "under_target"
+    assert targets[10]["actual_product_count"] == 3
+    assert targets[10]["status"] == "under_target"

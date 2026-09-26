@@ -142,3 +142,39 @@ def build_coverage_report(
         remaining_deficit_total=sum(row.deficit_count for row in rows),
     )
     return CatalogCoverageReport(tuple(rows), summary)
+
+
+def select_expansion_targets(
+    report: CatalogCoverageReport,
+    *,
+    limit: int | None = None,
+) -> tuple[CoverageReportRow, ...]:
+    """Return unmet coverage targets in deterministic expansion order."""
+
+    if limit is not None and limit < 1:
+        raise ValueError("Expansion target limit must be at least 1.")
+
+    status_order = {
+        "empty": 0,
+        "under_target": 1,
+    }
+
+    candidates = [
+        row
+        for row in report.rows
+        if row.status != "target_met"
+    ]
+
+    ordered = tuple(sorted(
+        candidates,
+        key=lambda row: (
+            _PRIORITY_ORDER[row.priority],
+            status_order[row.status],
+            row.coverage_ratio,
+            -row.deficit_count,
+            row.furniture_type_code,
+            row.market_code,
+        ),
+    ))
+
+    return ordered if limit is None else ordered[:limit]

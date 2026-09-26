@@ -73,3 +73,85 @@ def test_coverage_report_handles_empty_partial_exact_surplus_unknown_and_summary
     assert report.summary.desired_products_total == 7
     assert report.summary.actual_products_total == 7
     assert report.summary.remaining_deficit_total == 3
+
+
+def test_select_expansion_targets_prioritizes_empty_critical_categories():
+    from crawler.core.catalog_coverage import select_expansion_targets
+
+    plan = build_coverage_plan([
+        CoverageTarget("US", "sofa", 30, "critical"),
+        CoverageTarget("US", "accent_chair", 30, "critical"),
+        CoverageTarget("US", "desk", 30, "critical"),
+        CoverageTarget("US", "mirror", 15, "normal"),
+    ])
+
+    report = build_coverage_report(plan, {
+        ("US", "sofa"): 3,
+        ("US", "accent_chair"): 0,
+        ("US", "desk"): 0,
+        ("US", "mirror"): 0,
+    })
+
+    selected = select_expansion_targets(report)
+
+    assert [
+        (row.market_code, row.furniture_type_code)
+        for row in selected
+    ] == [
+        ("US", "accent_chair"),
+        ("US", "desk"),
+        ("US", "sofa"),
+        ("US", "mirror"),
+    ]
+
+
+def test_select_expansion_targets_excludes_met_targets():
+    from crawler.core.catalog_coverage import select_expansion_targets
+
+    plan = build_coverage_plan([
+        CoverageTarget("US", "sofa", 3, "critical"),
+        CoverageTarget("US", "desk", 30, "critical"),
+    ])
+
+    report = build_coverage_report(plan, {
+        ("US", "sofa"): 3,
+        ("US", "desk"): 0,
+    })
+
+    selected = select_expansion_targets(report)
+
+    assert [row.furniture_type_code for row in selected] == ["desk"]
+
+
+def test_select_expansion_targets_is_deterministic_with_limit():
+    from crawler.core.catalog_coverage import select_expansion_targets
+
+    plan = build_coverage_plan([
+        CoverageTarget("US", "coffee_table", 30, "critical"),
+        CoverageTarget("US", "bed_frame", 30, "critical"),
+        CoverageTarget("US", "accent_chair", 30, "critical"),
+    ])
+
+    report = build_coverage_report(plan, {})
+
+    selected = select_expansion_targets(report, limit=2)
+
+    assert [row.furniture_type_code for row in selected] == [
+        "accent_chair",
+        "bed_frame",
+    ]
+
+
+@pytest.mark.parametrize("limit", [0, -1])
+def test_select_expansion_targets_rejects_invalid_limit(limit):
+    from crawler.core.catalog_coverage import select_expansion_targets
+
+    report = build_coverage_report(
+        build_coverage_plan([
+            CoverageTarget("US", "sofa", 30, "critical"),
+        ]),
+        {},
+    )
+
+    with pytest.raises(ValueError):
+        select_expansion_targets(report, limit=limit)
