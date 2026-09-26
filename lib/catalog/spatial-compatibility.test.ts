@@ -178,6 +178,7 @@ test("candidate with no opening or neighbor conflict is compatible", () => {
   const result = evaluateCatalogReplacementContextCompatibility(
     "current",
     designObject,
+    candidate(20, 20),
     candidate(100, 60),
     geometry,
     [],
@@ -191,14 +192,16 @@ test("candidate overlapping a neighbor is incompatible while edge touching is co
   const overlapping = evaluateCatalogReplacementContextCompatibility(
     "current",
     designObject,
+    candidate(20, 20),
     candidate(100, 60),
     geometry,
     [],
-    [{ id: "neighbor", x_cm: 240, y_cm: 150, width_cm: 100, depth_cm: 60, rotation_degrees: 0 }],
+    [{ id: "neighbor", x_cm: 260, y_cm: 150, width_cm: 100, depth_cm: 60, rotation_degrees: 0 }],
   );
   const touching = evaluateCatalogReplacementContextCompatibility(
     "current",
     designObject,
+    candidate(20, 20),
     candidate(100, 60),
     geometry,
     [],
@@ -214,10 +217,11 @@ test("rotated candidate overlapping a rotated neighbor is incompatible", () => {
   const result = evaluateCatalogReplacementContextCompatibility(
     "current",
     { ...designObject, rotation_degrees: 45 },
+    candidate(20, 20),
     candidate(100, 40),
     geometry,
     [],
-    [{ id: "neighbor", x_cm: 235, y_cm: 150, width_cm: 100, depth_cm: 40, rotation_degrees: -45 }],
+    [{ id: "neighbor", x_cm: 255, y_cm: 150, width_cm: 100, depth_cm: 40, rotation_degrees: -45 }],
   );
 
   assert.equal(result.status, "incompatible");
@@ -228,6 +232,7 @@ test("candidate intruding into door clearance is incompatible and a clear candid
   const blocked = evaluateCatalogReplacementContextCompatibility(
     "current",
     { x_cm: 200, y_cm: 20, rotation_degrees: 0 },
+    candidate(20, 20),
     candidate(80, 20),
     geometry,
     [door],
@@ -236,6 +241,7 @@ test("candidate intruding into door clearance is incompatible and a clear candid
   const clear = evaluateCatalogReplacementContextCompatibility(
     "current",
     { x_cm: 200, y_cm: 50, rotation_degrees: 0 },
+    candidate(20, 20),
     candidate(80, 20),
     geometry,
     [door],
@@ -252,6 +258,7 @@ test("low furniture below a window sill fits while tall furniture blocks it", ()
   const low = evaluateCatalogReplacementContextCompatibility(
     "current",
     placement,
+    candidate(20, 20),
     candidate(80, 20, { heightCm: 90 }),
     geometry,
     [windowOpening],
@@ -260,6 +267,7 @@ test("low furniture below a window sill fits while tall furniture blocks it", ()
   const tall = evaluateCatalogReplacementContextCompatibility(
     "current",
     placement,
+    candidate(20, 20),
     candidate(80, 20, { heightCm: 91 }),
     geometry,
     [windowOpening],
@@ -275,6 +283,7 @@ test("missing required window clearance data is unknown", () => {
   const result = evaluateCatalogReplacementContextCompatibility(
     "current",
     { x_cm: 200, y_cm: 10, rotation_degrees: 0 },
+    candidate(20, 20),
     candidate(80, 20, { heightCm: null }),
     geometry,
     [windowOpening],
@@ -283,4 +292,58 @@ test("missing required window clearance data is unknown", () => {
 
   assert.equal(result.status, "unknown");
   assert.deepEqual(result.reasons, ["window_clearance_unavailable"]);
+});
+
+test("replacement preserves a pre-existing neighbor overlap without creating a new collision", () => {
+  const current = candidate(100, 60, { variantId: "current" });
+  const replacement = candidate(100, 60, { variantId: "replacement" });
+
+  const result = evaluateCatalogReplacementContextCompatibility(
+    "current",
+    designObject,
+    current,
+    replacement,
+    geometry,
+    [],
+    [
+      {
+        id: "neighbor",
+        x_cm: 240,
+        y_cm: 150,
+        width_cm: 100,
+        depth_cm: 60,
+        rotation_degrees: 0,
+      },
+    ],
+  );
+
+  assert.equal(result.status, "compatible");
+  assert.deepEqual(result.reasons, []);
+});
+
+test("replacement that introduces a new neighbor overlap remains incompatible", () => {
+  const current = candidate(20, 20, { variantId: "current" });
+  const replacement = candidate(100, 60, { variantId: "replacement" });
+
+  const result = evaluateCatalogReplacementContextCompatibility(
+    "current",
+    designObject,
+    current,
+    replacement,
+    geometry,
+    [],
+    [
+      {
+        id: "neighbor",
+        x_cm: 260,
+        y_cm: 150,
+        width_cm: 100,
+        depth_cm: 60,
+        rotation_degrees: 0,
+      },
+    ],
+  );
+
+  assert.equal(result.status, "incompatible");
+  assert.deepEqual(result.reasons, ["candidate_overlaps_neighbor"]);
 });

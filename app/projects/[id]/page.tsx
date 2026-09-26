@@ -12,6 +12,7 @@ export const instant = false;
 
 type Project = Tables<"projects">;
 type RoomPreferences = Tables<"room_preferences">;
+type Design = Tables<"designs">;
 
 function formatDimension(value: number) {
   return Number(value.toFixed(1)).toString();
@@ -80,7 +81,7 @@ export default async function ProjectPage({
   }
 
   const { id } = await params;
-  const [projectResult, preferencesResult] = await Promise.all([
+  const [projectResult, preferencesResult, designsResult] = await Promise.all([
     supabase
       .from("projects")
       .select("id, name, room_type, status, width_cm, length_cm, height_cm, currency, budget_min, budget_max, created_at, updated_at, user_id")
@@ -91,6 +92,11 @@ export default async function ProjectPage({
       .select("id, project_id, primary_style, secondary_style, color_mood, primary_color, secondary_color, accent_color, metal_color, preferred_materials, avoid_materials, room_functions, must_have_items, nice_to_have_items, household_size, special_requirements, additional_notes, priority, created_at, updated_at")
       .eq("project_id", id)
       .maybeSingle(),
+    supabase
+      .from("designs")
+      .select("id, project_id, version, status, design_name, summary, created_at")
+      .eq("project_id", id)
+      .order("version", { ascending: false }),
   ]);
   const geometryResult = await supabase
     .from("room_geometries")
@@ -98,12 +104,13 @@ export default async function ProjectPage({
     .eq("project_id", id)
     .maybeSingle();
 
-  if (projectResult.error || !projectResult.data || preferencesResult.error || geometryResult.error) {
+  if (projectResult.error || !projectResult.data || preferencesResult.error || designsResult.error || geometryResult.error) {
     notFound();
   }
 
   const project = projectResult.data as Project;
   const preferences = preferencesResult.data as RoomPreferences | null;
+  const savedDesigns = (designsResult.data ?? []) as Design[];
   const priority = preferences?.priority ? labelize(preferences.priority) : null;
 
   return (
@@ -174,6 +181,32 @@ export default async function ProjectPage({
             </>
           )}
         </div>
+        <section className="mt-8 border border-slate-200 bg-white p-6 shadow-[0_12px_30px_rgba(15,23,42,0.04)] sm:p-10">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-semibold tracking-tight">Saved designs</h2>
+              <p className="mt-2 text-sm text-slate-500">Open a saved design without generating it again.</p>
+            </div>
+            <span className="text-sm text-slate-500">{savedDesigns.length} saved</span>
+          </div>
+          {savedDesigns.length > 0 ? (
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              {savedDesigns.map((design) => (
+                <Link key={design.id} href={`/projects/${project.id}/designs/${design.id}`} className="border border-slate-200 bg-slate-50 p-4 transition-colors hover:border-slate-400">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="font-medium text-slate-950">{design.design_name ?? `Design version ${design.version}`}</h3>
+                      {design.summary && <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{design.summary}</p>}
+                    </div>
+                    <Badge variant="outline">Version {design.version}</Badge>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-6 text-sm text-slate-500">No saved designs yet. Generate one when you are ready.</p>
+          )}
+        </section>
         <FurniturePlanButton projectId={project.id} />
       </div>
     </main>

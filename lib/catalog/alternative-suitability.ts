@@ -45,6 +45,7 @@ export function evaluateCatalogAlternativeSuitability(
   const spatialCompatibility = evaluateCatalogReplacementContextCompatibility(
     context.currentObjectId,
     context.designObject,
+    current,
     alternative,
     context.geometry,
     context.openings,

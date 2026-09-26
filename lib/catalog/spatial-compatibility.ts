@@ -196,6 +196,7 @@ export function evaluateCatalogReplacementSpatialCompatibility(
 export function evaluateCatalogReplacementContextCompatibility(
   currentObjectId: string,
   designObject: DesignObjectSpatialFields,
+  current: CatalogCandidate,
   candidate: CatalogCandidate,
   geometry: RoomGeometry,
   openings: RoomOpening[],
@@ -211,6 +212,16 @@ export function evaluateCatalogReplacementContextCompatibility(
     candidate.depthCm!,
     designObject.rotation_degrees!,
   );
+
+  const currentFootprint =
+    isFinitePositive(current.widthCm) && isFinitePositive(current.depthCm)
+      ? rotatedFootprint(
+          point,
+          current.widthCm,
+          current.depthCm,
+          designObject.rotation_degrees!,
+        )
+      : null;
 
   for (const opening of openings) {
     const worldPosition = getOpeningWorldPosition(geometry, opening);
@@ -260,8 +271,21 @@ export function evaluateCatalogReplacementContextCompatibility(
       neighbor.depth_cm,
       neighbor.rotation_degrees,
     );
-    if (footprintsOverlapWithPositiveArea(candidateFootprint, neighborFootprint)) {
-      return { ...envelopeResult, status: "incompatible", reasons: ["candidate_overlaps_neighbor"] };
+    const candidateOverlaps =
+      footprintsOverlapWithPositiveArea(candidateFootprint, neighborFootprint);
+
+    if (!candidateOverlaps) continue;
+
+    const currentAlreadyOverlaps =
+      currentFootprint !== null
+      && footprintsOverlapWithPositiveArea(currentFootprint, neighborFootprint);
+
+    if (!currentAlreadyOverlaps) {
+      return {
+        ...envelopeResult,
+        status: "incompatible",
+        reasons: ["candidate_overlaps_neighbor"],
+      };
     }
   }
 

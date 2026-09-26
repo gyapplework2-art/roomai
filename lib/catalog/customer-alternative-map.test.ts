@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
+import type { RoomAIAlternative } from "@/lib/catalog/customer-alternative";
 import type { AlternativeSuitabilityContext } from "@/lib/catalog/alternative-suitability";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
 import type { RoomGeometry } from "@/lib/geometry/types";
@@ -185,4 +186,63 @@ test("context-aware customer map excludes alternatives when spatial context is u
   );
 
   assert.deepEqual(result.get("current"), []);
+});
+
+test("customer alternatives remain present when replacement identity is captured", () => {
+  const current = candidate("current");
+  const alternative = candidate("alternative", { productTitle: "Green Timber Sofa" });
+  const customerIdentity = new Map<RoomAIAlternative, string>();
+
+  const result = buildCustomerAlternativeMap(
+    [current],
+    [current, alternative],
+    4,
+    new Map([[current.variantId, suitabilityContext()]]),
+    customerIdentity,
+  );
+  const displayedAlternative = result.get(current.variantId)?.[0];
+
+  assert.ok(displayedAlternative);
+  assert.equal(displayedAlternative.product.name, "Green Timber Sofa");
+  assert.equal(customerIdentity.get(displayedAlternative), alternative.variantId);
+});
+
+test("missing replacement identity does not remove a customer alternative", () => {
+  const current = candidate("current");
+  const alternative = candidate("alternative");
+  const customerIdentity = new Map<RoomAIAlternative, string>();
+  const result = buildCustomerAlternativeMap(
+    [current],
+    [current, alternative],
+    4,
+    new Map([[current.variantId, suitabilityContext()]]),
+    customerIdentity,
+  );
+  const displayedAlternative = result.get(current.variantId)?.[0];
+
+  assert.ok(displayedAlternative);
+  customerIdentity.delete(displayedAlternative);
+  assert.equal(customerIdentity.has(displayedAlternative), false);
+  assert.deepEqual(result.get(current.variantId), [displayedAlternative]);
+});
+
+test("replacement identity remains outside the customer-safe alternative contract", () => {
+  const current = candidate("current");
+  const alternative = candidate("alternative");
+  const customerIdentity = new Map<RoomAIAlternative, string>();
+  const result = buildCustomerAlternativeMap(
+    [current],
+    [current, alternative],
+    4,
+    new Map([[current.variantId, suitabilityContext()]]),
+    customerIdentity,
+  );
+  const displayedAlternative = result.get(current.variantId)?.[0];
+
+  assert.ok(displayedAlternative);
+  const serialized = JSON.stringify(displayedAlternative);
+  assert.equal(serialized.includes("variantId"), false);
+  assert.equal(serialized.includes("productId"), false);
+  assert.equal(serialized.includes("vendorName"), false);
+  assert.equal(serialized.includes("productUrl"), false);
 });

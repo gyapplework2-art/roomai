@@ -1,6 +1,6 @@
 import { rankAlternativesFromCandidatePool } from "@/lib/catalog/alternative-batch";
 import {
-  toRoomAIAlternatives,
+  toRoomAIAlternative,
   type RoomAIAlternative,
 } from "@/lib/catalog/customer-alternative";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
@@ -11,6 +11,7 @@ export function buildCustomerAlternativeMap(
   candidatePool: CatalogCandidate[],
   limitPerProduct = 4,
   suitabilityContextsByVariantId?: Map<string, AlternativeSuitabilityContext>,
+  replacementVariantIdByAlternative?: Map<RoomAIAlternative, string>,
 ): Map<string, RoomAIAlternative[]> {
   return new Map(
     currents.map((current) => {
@@ -23,7 +24,15 @@ export function buildCustomerAlternativeMap(
           limitPerProduct,
           suitabilityContext,
         );
-      return [current.variantId, toRoomAIAlternatives(ranked)];
+      const alternatives = ranked.map((item) => {
+        const alternative = toRoomAIAlternative(item);
+        replacementVariantIdByAlternative?.set(
+          alternative,
+          item.candidate.variantId,
+        );
+        return alternative;
+      });
+      return [current.variantId, alternatives];
     }),
   );
 }

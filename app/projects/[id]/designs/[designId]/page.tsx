@@ -12,6 +12,7 @@ import {
 } from "@/lib/catalog/query";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
 import { calculateEstimatedDesignCost, designSpecificationSchema } from "@/lib/designs/schema";
+import { replaceFurnitureAction } from "@/lib/designs/replacement-actions";
 import { validateRoomOpenings } from "@/lib/geometry/openings";
 import { roomGeometrySchema, roomOpeningSchema } from "@/lib/geometry/schema";
 import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
@@ -72,11 +73,17 @@ function ObjectList({
   type,
   catalogByVariantId,
   alternativesByVariantId,
+  replacementVariantIdByAlternative,
+  projectId,
+  designId,
 }: {
   objects: DesignObject[];
   type: string;
   catalogByVariantId: Map<string, CatalogCandidate>;
   alternativesByVariantId: Map<string, RoomAIAlternative[]>;
+  replacementVariantIdByAlternative: Map<RoomAIAlternative, string>;
+  projectId: string;
+  designId: string;
 }) {
   const matchingObjects = objects.filter((object) => object.object_type === type);
 
@@ -151,7 +158,9 @@ function ObjectList({
                   <h4 className="text-sm font-semibold text-slate-950">RoomAI alternatives</h4>
                   <p className="mt-1 text-sm text-slate-600">Similar options selected for this design.</p>
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {alternatives.map(({ product }, index) => {
+                    {alternatives.map((alternative, index) => {
+                      const { product } = alternative;
+                      const selectedCatalogVariantId = replacementVariantIdByAlternative.get(alternative);
                       const alternativePrice = product.price.currency && product.price.amount !== null
                         ? formatMoney(product.price.currency, product.price.amount)
                         : null;
@@ -178,6 +187,17 @@ function ObjectList({
                               <Detail label="Style" value={product.style} />
                               <Detail label="Dimensions" value={alternativeDimensions} />
                             </dl>
+                            {selectedCatalogVariantId && (
+                              <form action={replaceFurnitureAction} className="mt-4">
+                                <input type="hidden" name="projectId" value={projectId} />
+                                <input type="hidden" name="designId" value={designId} />
+                                <input type="hidden" name="designObjectId" value={object.id} />
+                                <input type="hidden" name="selectedCatalogVariantId" value={selectedCatalogVariantId} />
+                                <button type="submit" className="border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800 transition-colors hover:border-slate-950">
+                                  Use this furniture
+                                </button>
+                              </form>
+                            )}
                           </div>
                         </article>
                       );
@@ -307,6 +327,7 @@ export default async function DesignPage({
     }
   }
   let alternativesByVariantId = new Map<string, RoomAIAlternative[]>();
+  const replacementVariantIdByAlternative = new Map<RoomAIAlternative, string>();
   if (catalogByVariantId.size > 0) {
     try {
       const currentCatalogCandidates = [...catalogByVariantId.values()];
@@ -316,6 +337,7 @@ export default async function DesignPage({
         candidatePool,
         4,
         suitabilityContextsByVariantId,
+        replacementVariantIdByAlternative,
       );
     } catch (error) {
       console.error("RoomAI design alternative hydration failed", {
@@ -374,6 +396,9 @@ export default async function DesignPage({
               type="furniture"
               catalogByVariantId={catalogByVariantId}
               alternativesByVariantId={alternativesByVariantId}
+              replacementVariantIdByAlternative={replacementVariantIdByAlternative}
+              projectId={projectId}
+              designId={designId}
             />
           </Section>
 
@@ -383,6 +408,9 @@ export default async function DesignPage({
               type="decoration"
               catalogByVariantId={catalogByVariantId}
               alternativesByVariantId={alternativesByVariantId}
+              replacementVariantIdByAlternative={replacementVariantIdByAlternative}
+              projectId={projectId}
+              designId={designId}
             />
           </Section>
 
