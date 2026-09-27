@@ -15,8 +15,8 @@ from crawler.core.catalog_inventory import HttpxCatalogInventoryTransport, load_
 from crawler.core.config import get_settings
 from crawler.core.fetcher import HttpFetcher
 from crawler.core.supabase_repository import HttpxPostgrestTransport, SupabaseCatalogExecutor
-from crawler.discovery.article import canonicalize_article_product_url, discover_article_sofa_urls, discover_article_sofas
-from crawler.discovery.source_map import approved_sources_for_target
+from crawler.discovery.article import discover_article_category, discover_article_sofa_urls
+from crawler.discovery.source_map import approved_sources_for_target, select_approved_source
 from crawler.discovery.sitemap import extract_sitemap_urls
 from crawler.vendors.article import ArticleVendorAdapter
 from crawler.vendors.ikea import IkeaVendorAdapter
@@ -31,6 +31,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vendor", choices=["article", "ikea"], default="article")
     parser.add_argument("--market", required=True, choices=["US", "CA"])
     parser.add_argument("--category", default="sofas")
+    parser.add_argument(
+        "--furniture-type",
+        help="Canonical RoomAI furniture type used to resolve an approved discovery source.",
+    )
     parser.add_argument("--source-url")
     parser.add_argument("--source-type", choices=["category", "sitemap"], default="category")
     parser.add_argument("--input", type=Path)
@@ -140,22 +144,66 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
         )
 
     if args.stage == "discover":
-        if args.vendor != "article" or args.market != "US" or args.category != "sofas":
-            raise ValueError("The first working discovery adapter is Article US sofas; no IKEA discovery is claimed.")
-        if not args.source_url:
-            raise ValueError("discover requires an explicit --source-url.")
-        fetched = await HttpFetcher().fetch(args.source_url)
+        if args.furniture_type:
+            source = select_approved_source(args.market, args.furniture_type)
+            vendor = source.vendor
+            vendor_market_code = source.vendor_market_code
+            source_category = source.source_category
+            source_type = source.source_type
+            source_url = source.source_url
+        else:
+            if not args.source_url:
+                raise ValueError(
+                    "discover requires --furniture-type for approved-source discovery "
+                    "or an explicit --source-url for manual discovery."
+                )
+            vendor = args.vendor
+            vendor_market_code = args.market
+            source_category = args.category
+            source_type = args.source_type
+            source_url = args.source_url
+
+        if vendor.lower() != "article" or vendor_market_code != "US":
+            raise ValueError(
+                "Discovery execution currently supports approved Article US sources only; "
+                "IKEA discovery is not yet implemented."
+            )
+
+        fetched = await HttpFetcher().fetch(source_url)
         if not fetched.succeeded or fetched.response_text is None:
             raise RuntimeError("Approved discovery source could not be fetched.")
-        discovery = (
-            discover_article_sofa_urls(extract_sitemap_urls(fetched.response_text), fetched.final_url, limit=args.limit)
-            if args.source_type == "sitemap"
-            else discover_article_sofas(fetched.response_text, fetched.final_url, limit=args.limit)
-        )
+
+        if source_type == "sitemap":
+            discovery = discover_article_sofa_urls(
+                extract_sitemap_urls(fetched.response_text),
+                fetched.final_url,
+                limit=args.limit,
+            )
+        else:
+            discovery = discover_article_category(
+                fetched.response_text,
+                fetched.final_url,
+                source_category=source_category,
+                limit=args.limit,
+            )
+
         document = {
             "stage": "discover",
-            "summary": {"vendor": "Article", "market": "US", "category": "sofas", "requested_limit": args.limit, "unique_candidates_found": len(discovery.candidates)},
-            "candidates": [candidate.__dict__ | {"discovered_at": candidate.discovered_at.isoformat()} for candidate in discovery.candidates],
+            "summary": {
+                "vendor": vendor,
+                "market": vendor_market_code,
+                "furniture_type": args.furniture_type,
+                "category": source_category,
+                "source_type": source_type,
+                "source_url": source_url,
+                "requested_limit": args.limit,
+                "unique_candidates_found": len(discovery.candidates),
+            },
+            "candidates": [
+                candidate.__dict__
+                | {"discovered_at": candidate.discovered_at.isoformat()}
+                for candidate in discovery.candidates
+            ],
         }
         return _write(document, args.output)
 

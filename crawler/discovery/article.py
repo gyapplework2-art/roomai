@@ -46,14 +46,17 @@ def canonicalize_article_product_url(url: str) -> tuple[str, str] | None:
     return urlunsplit((parsed.scheme, parsed.netloc.lower(), canonical_path, "", "")), match.group(1)
 
 
-def discover_article_sofas(
+def discover_article_category(
     html: str,
     source_page_url: str,
     *,
+    source_category: str,
     limit: int = 30,
     discovered_at: datetime | None = None,
 ) -> DiscoveryResult:
-    """Discover at most ``limit`` unique Article-style product links from one supplied page."""
+    """Discover bounded Article product links from one approved category page."""
+    if not source_category.strip():
+        raise ValueError("source_category is required.")
     if limit < 1:
         raise ValueError("Discovery limit must be at least 1.")
     timestamp = discovered_at or datetime.now(timezone.utc)
@@ -74,7 +77,7 @@ def discover_article_sofas(
         candidates.append(DiscoveryCandidate(
             vendor=ARTICLE_VENDOR,
             vendor_market_code=ARTICLE_US_MARKET,
-            source_category=ARTICLE_SOFA_CATEGORY,
+            source_category=source_category.strip(),
             product_url=product_url,
             article_page_id=page_id,
             discovered_from="category_page",
@@ -84,6 +87,23 @@ def discover_article_sofas(
         if len(candidates) == limit:
             break
     return DiscoveryResult(tuple(candidates), limit, duplicates_skipped, invalid_urls_skipped)
+
+
+def discover_article_sofas(
+    html: str,
+    source_page_url: str,
+    *,
+    limit: int = 30,
+    discovered_at: datetime | None = None,
+) -> DiscoveryResult:
+    """Backward-compatible Article US sofa category discovery."""
+    return discover_article_category(
+        html,
+        source_page_url,
+        source_category=ARTICLE_SOFA_CATEGORY,
+        limit=limit,
+        discovered_at=discovered_at,
+    )
 
 
 def discover_article_sofa_urls(
