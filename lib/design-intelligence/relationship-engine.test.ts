@@ -199,29 +199,25 @@ test("supports rug alias through the registry", () => {
 
 test("unsupported furniture pair returns null", () => {
   const result = evaluateFurnitureRelationship(
-    input("desk", "office_chair"),
+    input("coffee_table", "accent_chair", 120, 70),
   );
 
   assert.equal(result, null);
 });
 
 test("unsupported pair is not confused with unknown evidence", () => {
-  const unsupported = evaluateFurnitureRelationship(
-    input("desk", "office_chair", 140, 60, null, null),
+  const result = evaluateFurnitureRelationship(
+    input(
+      "coffee_table",
+      "accent_chair",
+      120,
+      70,
+      null,
+      null,
+    ),
   );
 
-  const applicableUnknown = evaluateFurnitureRelationship(
-    input("sofa", "area_rug", 240, 200, null, null),
-  );
-
-  assert.equal(unsupported, null);
-  assert.ok(applicableUnknown);
-
-  const color = applicableUnknown.dimensions.find(
-    (dimension) => dimension.dimension === "color_harmony",
-  );
-
-  assert.equal(color?.compatibility, "unknown");
+  assert.equal(result, null);
 });
 
 test("dispatcher does not expose vendor or product identity in relationship output", () => {
@@ -394,6 +390,83 @@ test("supports bed frame alias through relationship registry", () => {
 test("bed nightstand relationship output does not expose catalog identity", () => {
   const result = evaluateFurnitureRelationship(
     input("bed", "nightstand", 165, 50),
+  );
+
+  assert.ok(result);
+
+  const serialized = JSON.stringify(result);
+
+  assert.equal(serialized.includes("vendorName"), false);
+  assert.equal(serialized.includes("productUrl"), false);
+  assert.equal(serialized.includes("productId"), false);
+  assert.equal(serialized.includes("variantId"), false);
+});
+
+test("dispatches desk office chair relationship", () => {
+  const result = evaluateFurnitureRelationship(
+    input("desk", "office_chair", 140, 60),
+  );
+
+  assert.ok(result);
+  assert.equal(result.relationshipId, "desk_office_chair");
+  assert.deepEqual(result.roleIds, [
+    "role-desk",
+    "role-office_chair",
+  ]);
+});
+
+test("desk office chair dispatcher result conforms to E.1 relationship schema", () => {
+  const result = evaluateFurnitureRelationship(
+    input("desk", "office_chair", 140, 60),
+  );
+
+  assert.ok(result);
+  assert.doesNotThrow(() =>
+    relationshipEvaluationSchema.parse(result),
+  );
+});
+
+test("normalizes desk office chair dimensions into E.1 dimension names", () => {
+  const result = evaluateFurnitureRelationship(
+    input("desk", "office_chair", 140, 60),
+  );
+
+  assert.ok(result);
+  assert.deepEqual(
+    result.dimensions.map((dimension) => dimension.dimension),
+    [
+      "scale_proportion",
+      "functional_relationship",
+      "color_harmony",
+    ],
+  );
+});
+
+test("preserves canonical desk office chair role order when arguments are reversed", () => {
+  const result = evaluateFurnitureRelationship(
+    input("office_chair", "desk", 60, 140),
+  );
+
+  assert.ok(result);
+  assert.equal(result.relationshipId, "desk_office_chair");
+  assert.deepEqual(result.roleIds, [
+    "role-desk",
+    "role-office_chair",
+  ]);
+});
+
+test("registered desk office chair pair is no longer treated as unsupported", () => {
+  const result = evaluateFurnitureRelationship(
+    input("desk", "office_chair", 140, 60),
+  );
+
+  assert.notEqual(result, null);
+  assert.equal(result?.relationshipId, "desk_office_chair");
+});
+
+test("desk office chair relationship output does not expose catalog identity", () => {
+  const result = evaluateFurnitureRelationship(
+    input("desk", "office_chair", 140, 60),
   );
 
   assert.ok(result);
