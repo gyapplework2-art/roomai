@@ -16,6 +16,7 @@ from crawler.core.config import get_settings
 from crawler.core.fetcher import HttpFetcher
 from crawler.core.supabase_repository import HttpxPostgrestTransport, SupabaseCatalogExecutor
 from crawler.discovery.article import canonicalize_article_product_url, discover_article_sofa_urls, discover_article_sofas
+from crawler.discovery.source_map import approved_sources_for_target
 from crawler.discovery.sitemap import extract_sitemap_urls
 from crawler.vendors.article import ArticleVendorAdapter
 from crawler.vendors.ikea import IkeaVendorAdapter
@@ -73,6 +74,22 @@ def _coverage_document(
 ) -> dict[str, object]:
     report = build_coverage_report(US_INITIAL_COVERAGE_PLAN, counts)
     expansion_targets = select_expansion_targets(report, limit=limit)
+    expansion_source_status = []
+
+    for target in expansion_targets:
+        sources = approved_sources_for_target(
+            target.market_code,
+            target.furniture_type_code,
+        )
+        expansion_source_status.append({
+            "market_code": target.market_code,
+            "furniture_type_code": target.furniture_type_code,
+            "source_available": bool(sources),
+            "approved_sources": [
+                source.__dict__
+                for source in sources
+            ],
+        })
 
     return {
         "stage": "plan",
@@ -81,6 +98,7 @@ def _coverage_document(
             "rows": [row.__dict__ for row in report.rows],
             "summary": report.summary.__dict__,
             "expansion_targets": [row.__dict__ for row in expansion_targets],
+            "expansion_source_status": expansion_source_status,
         },
     }
 

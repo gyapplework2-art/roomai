@@ -223,3 +223,63 @@ def test_live_inventory_expansion_targets_reflect_current_counts(monkeypatch):
     assert targets[9]["status"] == "under_target"
     assert targets[10]["actual_product_count"] == 3
     assert targets[10]["status"] == "under_target"
+
+
+def test_plan_reports_approved_source_availability_for_expansion_targets():
+    document = run(
+        expand_catalog.run(
+            make_args(limit=30)
+        )
+    )
+
+    statuses = document["coverage"]["expansion_source_status"]
+    by_type = {
+        item["furniture_type_code"]: item
+        for item in statuses
+    }
+
+    assert by_type["sofa"] == {
+        "market_code": "US",
+        "furniture_type_code": "sofa",
+        "source_available": True,
+        "approved_sources": [
+            {
+                "market_code": "US",
+                "furniture_type_code": "sofa",
+                "vendor": "article",
+                "vendor_market_code": "US",
+                "source_category": "sofas",
+                "source_type": "category",
+                "source_url": "https://www.article.com/browse/1/sofas?collectionId=603",
+            }
+        ],
+    }
+
+    assert by_type["accent_chair"] == {
+        "market_code": "US",
+        "furniture_type_code": "accent_chair",
+        "source_available": False,
+        "approved_sources": [],
+    }
+
+
+def test_expansion_source_status_is_bounded_with_expansion_targets():
+    document = run(
+        expand_catalog.run(
+            make_args(limit=3)
+        )
+    )
+
+    targets = document["coverage"]["expansion_targets"]
+    statuses = document["coverage"]["expansion_source_status"]
+
+    assert len(targets) == 3
+    assert len(statuses) == 3
+
+    assert [
+        item["furniture_type_code"]
+        for item in statuses
+    ] == [
+        item["furniture_type_code"]
+        for item in targets
+    ]
