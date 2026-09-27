@@ -1108,3 +1108,52 @@ def test_third_vendor_uses_generic_normalization_without_adapter_or_inference():
 
     assert variant.normalized_color == "light_gray"
     assert variant.normalized_material == "velvet"
+
+
+@pytest.mark.parametrize(
+    ("source", "normalized"),
+    [
+        ("100% wool", "wool"),
+        ("100 % wool", "wool"),
+        ("100% polyester", "polyester"),
+        ("100 % polyester", "polyester"),
+    ],
+)
+def test_single_material_percentage_normalizes_without_collapsing_composites(
+    source: str,
+    normalized: str,
+):
+    assert normalize_material(source) == normalized
+
+
+@pytest.mark.parametrize(
+    ("source", "normalized"),
+    [
+        ("Sandstone", "beige"),
+        ("Sandstone Wool Bouclé", "beige"),
+        ("Hale Camel", "tan"),
+        ("Hale Camel Velvet", "tan"),
+    ],
+)
+def test_d3a19_explicit_vendor_color_terms_map_to_controlled_colors(
+    source: str,
+    normalized: str,
+):
+    assert normalize_color(source) == normalized
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "70% wool, 30% viscose",
+        "80 % cotton, 20 % polyester",
+        "Solid oak, steel hardware",
+        "Solid and veneered white oak, MDF, steel hardware",
+    ],
+)
+def test_d3a19_composite_materials_remain_unresolved(source: str):
+    assert normalize_material(source) is None
+
+
+def test_d3a19_dark_fleck_is_not_inferred_as_gray():
+    assert normalize_color("Dark Fleck") is None

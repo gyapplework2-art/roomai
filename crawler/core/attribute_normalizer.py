@@ -7,6 +7,7 @@ _COLOR_VALUES = {
     "dark gray": "dark_gray", "dark grey": "dark_gray", "black": "black", "white": "white",
     "ivory": "ivory", "off white": "off_white", "cream": "cream", "beige": "beige",
     "warm beige": "warm_beige", "oatmeal": "warm_beige", "taupe": "taupe", "tan": "tan",
+    "sandstone": "beige", "camel": "tan",
     "brown": "brown", "natural": "natural", "charcoal": "charcoal", "charcoal gray": "charcoal",
     "charcoal grey": "charcoal", "green": "green", "sage green": "sage_green", "sage": "sage_green",
     "olive green": "olive_green", "olive": "olive_green", "dark green": "dark_green",
@@ -79,6 +80,14 @@ def normalize_material(value: str | None) -> str | None:
     normalized = _normalized_words(value)
     if _COMPOSITE_MATERIAL.search(normalized):
         return None
+
+    single_material_percentage = re.fullmatch(
+        r"100\s*%\s+(.+)",
+        normalized,
+    )
+    if single_material_percentage:
+        normalized = single_material_percentage.group(1).strip()
+
     return _MATERIAL_VALUES.get(normalized)
 
 

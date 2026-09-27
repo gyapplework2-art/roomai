@@ -75,6 +75,33 @@ _APPROVED_DISCOVERY_SOURCES: tuple[ApprovedDiscoverySource, ...] = (
         source_type="category",
         source_url="https://www.article.com/browse/37/tables-desks",
     ),
+    ApprovedDiscoverySource(
+        market_code="US",
+        furniture_type_code="dining_table",
+        vendor="article",
+        vendor_market_code="US",
+        source_category="dining_tables",
+        source_type="category",
+        source_url="https://www.article.com/browse/10/tables-dining-tables",
+    ),
+    ApprovedDiscoverySource(
+        market_code="US",
+        furniture_type_code="area_rug",
+        vendor="article",
+        vendor_market_code="US",
+        source_category="rugs",
+        source_type="category",
+        source_url="https://www.article.com/browse/50/decor-rugs",
+    ),
+    ApprovedDiscoverySource(
+        market_code="US",
+        furniture_type_code="office_chair",
+        vendor="article",
+        vendor_market_code="US",
+        source_category="office_chairs",
+        source_type="category",
+        source_url="https://www.article.com/browse/82/chairs-office-chairs",
+    ),
 )
 
 

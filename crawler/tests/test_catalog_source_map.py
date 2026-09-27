@@ -66,3 +66,22 @@ def test_source_lookup_rejects_blank_target_keys(
             market_code,
             furniture_type_code,
         )
+
+
+def test_new_d3a19_article_sources_are_explicitly_mapped():
+    expected = {
+        "dining_table": ("dining_tables", "10/tables-dining-tables"),
+        "area_rug": ("rugs", "50/decor-rugs"),
+        "office_chair": ("office_chairs", "82/chairs-office-chairs"),
+    }
+
+    for furniture_type, (category, url_fragment) in expected.items():
+        sources = approved_sources_for_target("US", furniture_type)
+
+        assert len(sources) == 1
+
+        source = sources[0]
+        assert source.vendor == "article"
+        assert source.vendor_market_code == "US"
+        assert source.source_category == category
+        assert url_fragment in source.source_url
