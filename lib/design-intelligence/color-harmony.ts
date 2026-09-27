@@ -136,7 +136,7 @@ export function normalizeDesignColor(
   };
 }
 
-function familiesHarmonize(
+export function familiesHarmonize(
   first: DesignColorFamily,
   second: DesignColorFamily,
 ): boolean {
