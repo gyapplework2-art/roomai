@@ -1,5 +1,6 @@
 "use server";
 
+import { rankCatalogCandidates } from "@/lib/catalog/candidate-ranking";
 import { findCatalogProducts } from "@/lib/catalog/query";
 import {
   deduplicateCatalogCandidates,
@@ -129,7 +130,7 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
             furnitureTypeCode,
             currency: brief.project.currency,
             normalizedAvailability: "in_stock",
-            limit: 10,
+            limit: 30,
           });
         } catch (error) {
           console.error("RoomAI catalog enrichment failed", {
@@ -141,7 +142,13 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
         }
       }),
     );
-    const catalogCandidates = deduplicateCatalogCandidates(catalogResults.flat());
+    const catalogCandidates = deduplicateCatalogCandidates(
+      catalogResults.flatMap((candidates) =>
+        rankCatalogCandidates(candidates)
+          .slice(0, 10)
+          .map((ranked) => ranked.candidate),
+      ),
+    );
     const generation = await generateDesignSpecification(
       brief,
       catalogCandidates,
