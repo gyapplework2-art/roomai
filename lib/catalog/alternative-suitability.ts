@@ -7,6 +7,7 @@ import {
   type RankedCatalogAlternative,
 } from "@/lib/catalog/alternative-ranking";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
+import type { FurnitureDesignAttributes } from "@/lib/design-intelligence/furniture-attributes";
 import {
   evaluateCatalogReplacementContextCompatibility,
   type NeighborSpatialFields,
@@ -41,6 +42,10 @@ export function evaluateCatalogAlternativeSuitability(
   current: CatalogCandidate,
   alternative: CatalogCandidate,
   context: AlternativeSuitabilityContext,
+  furnitureAttributes?: {
+    current: FurnitureDesignAttributes;
+    alternative: FurnitureDesignAttributes;
+  },
 ): SuitableCatalogAlternative | null {
   const spatialCompatibility = evaluateCatalogReplacementContextCompatibility(
     context.currentObjectId,
@@ -57,7 +62,7 @@ export function evaluateCatalogAlternativeSuitability(
   if (spatialCompatibility.status !== "compatible") return null;
 
   const catalogRanking = rankCatalogAlternative(current, alternative);
-  const aestheticCompatibility = evaluateAestheticCompatibility(current, alternative);
+  const aestheticCompatibility = evaluateAestheticCompatibility(current, alternative, furnitureAttributes);
   const suitabilityScore =
     catalogRanking.score * ALTERNATIVE_SUITABILITY_WEIGHTS.catalogSimilarity
     + aestheticCompatibility.score * ALTERNATIVE_SUITABILITY_WEIGHTS.aestheticCompatibility;

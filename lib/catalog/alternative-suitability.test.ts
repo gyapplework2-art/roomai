@@ -3,11 +3,13 @@ import test from "node:test";
 
 import {
   ALTERNATIVE_SUITABILITY_WEIGHTS,
+  evaluateCatalogAlternativeSuitability,
   rankSuitableCatalogAlternatives,
   type AlternativeSuitabilityContext,
 } from "@/lib/catalog/alternative-suitability";
 import { toRoomAIAlternatives } from "@/lib/catalog/customer-alternative";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
+import { normalizeFurnitureAttributes } from "@/lib/design-intelligence/furniture-attributes";
 import type { RoomGeometry } from "@/lib/geometry/types";
 
 const geometry: RoomGeometry = {
@@ -171,4 +173,70 @@ test("green leather Timber sofa remains a valid alternative to tan Timber sofa",
   assert.equal(ranked[0].candidate.variantId, "timber-green");
   assert.equal(ranked[0].spatialCompatibility.status, "compatible");
   assert.equal(ranked[0].aestheticCompatibility.status, "compatible");
+});
+
+test("detailed furniture evidence reaches aesthetic compatibility without changing suitability scoring", () => {
+  const current = candidate("current");
+  const alternative = candidate("alternative", { normalizedColor: "green" });
+  const baseline = evaluateCatalogAlternativeSuitability(current, alternative, context);
+  const withEvidence = evaluateCatalogAlternativeSuitability(current, alternative, context, {
+    current: normalizeFurnitureAttributes(current, {
+      sourceAttributes: { "Arm Style": "Rolled Arms", "Seat Depth": "22 in" },
+    }),
+    alternative: normalizeFurnitureAttributes(alternative, {
+      sourceAttributes: { "Arm Style": "Track Arms", "Seat Depth": "22 in" },
+    }),
+  });
+
+  assert.ok(baseline && withEvidence);
+  assert.equal(baseline.aestheticCompatibility.furnitureAttributeCompatibility, undefined);
+  assert.equal(withEvidence.aestheticCompatibility.furnitureAttributeCompatibility?.attributes.armStyle.compatibility, "mixed");
+  assert.equal(withEvidence.aestheticCompatibility.furnitureAttributeCompatibility?.attributes.seatDepthCm.compatibility, "compatible");
+  assert.equal(withEvidence.aestheticCompatibility.furnitureAttributeCompatibility?.overallCompatibility, "mixed");
+  assert.equal(withEvidence.aestheticCompatibility.score, baseline.aestheticCompatibility.score);
+  assert.equal(withEvidence.aestheticCompatibility.status, baseline.aestheticCompatibility.status);
+  assert.deepEqual(withEvidence.aestheticCompatibility.reasons, baseline.aestheticCompatibility.reasons);
+  assert.equal(withEvidence.suitabilityScore, baseline.suitabilityScore);
+  assert.equal(ALTERNATIVE_SUITABILITY_WEIGHTS.catalogSimilarity, 0.7);
+  assert.equal(ALTERNATIVE_SUITABILITY_WEIGHTS.aestheticCompatibility, 0.3);
+  assert.equal(withEvidence.suitabilityScore,
+    withEvidence.score * 0.7 + withEvidence.aestheticCompatibility.score * 0.3);
+});
+
+test("missing detail remains unknown and does not change the existing three-argument result", () => {
+  const current = candidate("current");
+  const alternative = candidate("alternative");
+  const empty = normalizeFurnitureAttributes({ seatingCapacity: null });
+  const baseline = evaluateCatalogAlternativeSuitability(current, alternative, context);
+  const explicitUndefined = evaluateCatalogAlternativeSuitability(current, alternative, context, undefined);
+  const withUnknown = evaluateCatalogAlternativeSuitability(current, alternative, context, {
+    current: empty,
+    alternative: empty,
+  });
+
+  assert.deepEqual(explicitUndefined, baseline);
+  assert.ok(baseline && withUnknown);
+  assert.equal(withUnknown.aestheticCompatibility.furnitureAttributeCompatibility?.overallCompatibility, "unknown");
+  assert.equal(withUnknown.aestheticCompatibility.furnitureAttributeCompatibility?.attributes.seatDepthCm.compatibility, "unknown");
+  assert.equal(withUnknown.suitabilityScore, baseline.suitabilityScore);
+  assert.equal(withUnknown.aestheticCompatibility.status, baseline.aestheticCompatibility.status);
+});
+
+test("customer alternatives omit attribute evidence along with catalog and suitability internals", () => {
+  const current = candidate("current");
+  const alternative = candidate("alternative");
+  const attributes = normalizeFurnitureAttributes(current, { sourceAttributes: { Tufting: "Yes" } });
+  const suitable = evaluateCatalogAlternativeSuitability(current, alternative, context, {
+    current: attributes,
+    alternative: attributes,
+  });
+  assert.ok(suitable);
+
+  const serialized = JSON.stringify(toRoomAIAlternatives([suitable]));
+  for (const internalField of [
+    "vendorName", "productUrl", "variantId", "productId", "suitabilityScore",
+    "spatialCompatibility", "aestheticCompatibility", "furnitureAttributeCompatibility", "tufting",
+  ]) {
+    assert.equal(serialized.includes(internalField), false, internalField);
+  }
 });

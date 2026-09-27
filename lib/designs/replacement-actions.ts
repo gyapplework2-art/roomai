@@ -2,8 +2,12 @@
 
 import { redirect } from "next/navigation";
 
-import { evaluateCatalogAlternativeSuitability } from "@/lib/catalog/alternative-suitability";
+import {
+  evaluateCatalogAlternativeSuitability,
+} from "@/lib/catalog/alternative-suitability";
+import { getFurnitureAttributesByVariantIds } from "@/lib/catalog/furniture-attributes";
 import { findCatalogProductsByVariantIds } from "@/lib/catalog/query";
+import type { FurnitureDesignAttributes } from "@/lib/design-intelligence/furniture-attributes";
 import { createReplacementClone } from "@/lib/designs/replacement";
 import { designSpecificationSchema } from "@/lib/designs/schema";
 import { validateRoomOpenings } from "@/lib/geometry/openings";
@@ -103,6 +107,25 @@ export async function replaceFurnitureInDesign(input: {
   }
   if (!validateRoomOpenings(geometryParsed.data, openings).valid) return { ok: false, error: "invalid_room_context" };
 
+  let furnitureAttributes: { current: FurnitureDesignAttributes; alternative: FurnitureDesignAttributes } | undefined;
+  try {
+    const attributesByVariantId = await getFurnitureAttributesByVariantIds(
+      [currentCandidate.variantId, selectedCandidate.variantId],
+      new Map([
+        [currentCandidate.variantId, currentCandidate.seatingCapacity],
+        [selectedCandidate.variantId, selectedCandidate.seatingCapacity],
+      ]),
+    );
+    const current = attributesByVariantId.get(currentCandidate.variantId);
+    const alternative = attributesByVariantId.get(selectedCandidate.variantId);
+    if (current && alternative) furnitureAttributes = { current, alternative };
+  } catch (error) {
+    console.error("RoomAI replacement attribute lookup failed", {
+      designId: input.designId,
+      error: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
+
   const suitability = evaluateCatalogAlternativeSuitability(currentCandidate, selectedCandidate, {
     currentObjectId: selectedObject.id,
     designObject: {
@@ -113,7 +136,7 @@ export async function replaceFurnitureInDesign(input: {
     geometry: geometryParsed.data,
     openings,
     neighbors: objects,
-  });
+  }, furnitureAttributes);
   if (!suitability) return { ok: false, error: "replacement_not_eligible" };
 
   const specificationParsed = designSpecificationSchema.safeParse(designResult.data.design_specification);
