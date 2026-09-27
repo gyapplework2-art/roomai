@@ -11,6 +11,7 @@ from crawler.core.catalog_coverage import (
     build_coverage_report,
     select_expansion_targets,
 )
+from crawler.core.catalog_expansion import expand_catalog_coverage
 from crawler.core.catalog_inventory import HttpxCatalogInventoryTransport, load_inventory_counts
 from crawler.core.config import get_settings
 from crawler.core.fetcher import HttpFetcher
@@ -27,7 +28,7 @@ MAX_LIMIT = 50
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one explicit, bounded catalog expansion stage.")
-    parser.add_argument("stage", choices=["plan", "discover", "intake", "persist", "promote"])
+    parser.add_argument("stage", choices=["plan", "discover", "intake", "persist", "promote", "expand"])
     parser.add_argument("--vendor", choices=["article", "ikea"], default="article")
     parser.add_argument("--market", required=True, choices=["US", "CA"])
     parser.add_argument("--category", default="sofas")
@@ -47,6 +48,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--variant-id", action="append", default=[])
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    parser.add_argument(
+        "--target-limit",
+        type=int,
+        default=1,
+        help="Maximum source-backed coverage targets processed by expand.",
+    )
     parser.add_argument("--execute", action="store_true", help="Request writes; existing environment write guards still apply.")
     return parser.parse_args()
 
@@ -142,6 +149,46 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
             _plan_document(args.inventory, limit=args.limit),
             args.output,
         )
+
+    if args.stage == "expand":
+        if args.market != "US":
+            raise ValueError(
+                "Automated expansion currently supports the US coverage plan only."
+            )
+        if args.target_limit < 1:
+            raise ValueError("--target-limit must be at least 1.")
+
+        counts = await load_inventory_counts(
+            HttpxCatalogInventoryTransport()
+        )
+        report = build_coverage_report(
+            US_INITIAL_COVERAGE_PLAN,
+            counts,
+        )
+
+        settings = get_settings()
+        executor = SupabaseCatalogExecutor(
+            HttpxPostgrestTransport(settings)
+            if args.execute and settings.catalog_allow_writes
+            else None,
+            settings=settings,
+            write_enabled=args.execute,
+        )
+
+        expansion = await expand_catalog_coverage(
+            report,
+            fetcher=HttpFetcher(),
+            executor=executor,
+            target_limit=args.target_limit,
+            product_limit=args.limit,
+            execute=args.execute,
+        )
+
+        document = expansion.as_dict()
+        document["coverage_before"] = {
+            "summary": report.summary.__dict__,
+        }
+        return _write(document, args.output)
 
     if args.stage == "discover":
         if args.furniture_type:
