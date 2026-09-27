@@ -1,4 +1,9 @@
 import type { CatalogCandidate } from "@/lib/catalog/schema";
+import {
+  evaluateFurnitureAttributeCompatibility,
+  type FurnitureAttributeCompatibility,
+} from "@/lib/design-intelligence/furniture-attribute-compatibility";
+import type { FurnitureDesignAttributes } from "@/lib/design-intelligence/furniture-attributes";
 
 export const AESTHETIC_SCORE_WEIGHTS = {
   style: 30,
@@ -12,6 +17,7 @@ export type AestheticCompatibilityResult = {
   score: number;
   status: "compatible" | "mixed" | "unknown";
   reasons: string[];
+  furnitureAttributeCompatibility?: FurnitureAttributeCompatibility;
 };
 
 function normalized(value: string | null): string | null {
@@ -64,6 +70,10 @@ function scoreProportion(current: CatalogCandidate, alternative: CatalogCandidat
 export function evaluateAestheticCompatibility(
   current: CatalogCandidate,
   alternative: CatalogCandidate,
+  furnitureAttributes?: {
+    current: FurnitureDesignAttributes;
+    alternative: FurnitureDesignAttributes;
+  },
 ): AestheticCompatibilityResult {
   const components = [
     scoreVisualAttribute(current.normalizedStyle, alternative.normalizedStyle, AESTHETIC_SCORE_WEIGHTS.style, "style"),
@@ -74,16 +84,24 @@ export function evaluateAestheticCompatibility(
   ];
   const comparableCount = components.filter((component) => component.comparable).length;
   const score = components.reduce((total, component) => total + component.score, 0);
+  const detailedEvidence = furnitureAttributes
+    ? { furnitureAttributeCompatibility: evaluateFurnitureAttributeCompatibility(
+      furnitureAttributes.current,
+      furnitureAttributes.alternative,
+    ) }
+    : {};
   if (comparableCount === 0) {
     return {
       score,
       status: "unknown",
       reasons: [...components.map((component) => component.reason), "insufficient_aesthetic_metadata"],
+      ...detailedEvidence,
     };
   }
   return {
     score,
     status: score >= 70 ? "compatible" : "mixed",
     reasons: components.map((component) => component.reason),
+    ...detailedEvidence,
   };
 }
