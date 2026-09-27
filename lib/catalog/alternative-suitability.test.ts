@@ -178,17 +178,21 @@ test("green leather Timber sofa remains a valid alternative to tan Timber sofa",
 test("detailed furniture evidence reaches aesthetic compatibility without changing suitability scoring", () => {
   const current = candidate("current");
   const alternative = candidate("alternative", { normalizedColor: "green" });
+  const currentAttributes = normalizeFurnitureAttributes(current, {
+    sourceAttributes: { "Arm Style": "Rolled Arms", "Seat Depth": "22 in" },
+  });
+  const alternativeAttributes = normalizeFurnitureAttributes(alternative, {
+    sourceAttributes: { "Arm Style": "Track Arms", "Seat Depth": "22 in" },
+  });
   const baseline = evaluateCatalogAlternativeSuitability(current, alternative, context);
   const withEvidence = evaluateCatalogAlternativeSuitability(current, alternative, context, {
-    current: normalizeFurnitureAttributes(current, {
-      sourceAttributes: { "Arm Style": "Rolled Arms", "Seat Depth": "22 in" },
-    }),
-    alternative: normalizeFurnitureAttributes(alternative, {
-      sourceAttributes: { "Arm Style": "Track Arms", "Seat Depth": "22 in" },
-    }),
+    current: currentAttributes,
+    alternative: alternativeAttributes,
   });
 
   assert.ok(baseline && withEvidence);
+  assert.equal(currentAttributes.seatDepthCm, 55.88);
+  assert.equal(alternativeAttributes.seatDepthCm, 55.88);
   assert.equal(baseline.aestheticCompatibility.furnitureAttributeCompatibility, undefined);
   assert.equal(withEvidence.aestheticCompatibility.furnitureAttributeCompatibility?.attributes.armStyle.compatibility, "mixed");
   assert.equal(withEvidence.aestheticCompatibility.furnitureAttributeCompatibility?.attributes.seatDepthCm.compatibility, "compatible");
@@ -201,6 +205,9 @@ test("detailed furniture evidence reaches aesthetic compatibility without changi
   assert.equal(ALTERNATIVE_SUITABILITY_WEIGHTS.aestheticCompatibility, 0.3);
   assert.equal(withEvidence.suitabilityScore,
     withEvidence.score * 0.7 + withEvidence.aestheticCompatibility.score * 0.3);
+  const { score, status, reasons } = withEvidence.aestheticCompatibility;
+  const originalAestheticResult = { score, status, reasons };
+  assert.deepEqual({ ...withEvidence, aestheticCompatibility: originalAestheticResult }, baseline);
 });
 
 test("missing detail remains unknown and does not change the existing three-argument result", () => {
