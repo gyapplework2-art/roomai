@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { CatalogCandidate } from "@/lib/catalog/schema";
 
 export type CatalogSelectionIdentity = {
@@ -7,26 +9,28 @@ export type CatalogSelectionIdentity = {
 
 export type CatalogSelectionsByObjectId = Record<string, CatalogSelectionIdentity>;
 
-export type AICatalogCandidate = {
-  catalogSelectionKey: string;
-  furnitureTypeCode: string | null;
-  furnitureTypeName: string | null;
-  productTitle: string | null;
-  roomaiDescription: string | null;
-  normalizedColor: string | null;
-  normalizedMaterial: string | null;
-  normalizedStyle: string | null;
-  configuration: string | null;
-  seatingCapacity: number | null;
-  dimensions: {
-    widthCm: number | null;
-    depthCm: number | null;
-    heightCm: number | null;
-    weightKg: number | null;
-  };
-  currency: string | null;
-  roomaiSellingPrice: number | null;
-};
+export const aiCatalogCandidateSchema = z.object({
+  catalogSelectionKey: z.string().min(1),
+  furnitureTypeCode: z.string().nullable(),
+  furnitureTypeName: z.string().nullable(),
+  productTitle: z.string().nullable(),
+  roomaiDescription: z.string().nullable(),
+  normalizedColor: z.string().nullable(),
+  normalizedMaterial: z.string().nullable(),
+  normalizedStyle: z.string().nullable(),
+  configuration: z.string().nullable(),
+  seatingCapacity: z.number().nullable(),
+  dimensions: z.object({
+    widthCm: z.number().nullable(),
+    depthCm: z.number().nullable(),
+    heightCm: z.number().nullable(),
+    weightKg: z.number().nullable(),
+  }),
+  currency: z.string().nullable(),
+  roomaiSellingPrice: z.number().nullable(),
+}).strict();
+
+export type AICatalogCandidate = z.infer<typeof aiCatalogCandidateSchema>;
 
 const FURNITURE_TYPE_ALIASES: Record<string, string> = {
   rug: "area_rug",
@@ -57,7 +61,7 @@ export function createCatalogCandidateSelectionContext(candidates: CatalogCandid
       catalogProductId: candidate.productId,
       catalogProductVariantId: candidate.variantId,
     };
-    return {
+    return aiCatalogCandidateSchema.parse({
       catalogSelectionKey,
       furnitureTypeCode: candidate.furnitureTypeCode,
       furnitureTypeName: candidate.furnitureTypeName,
@@ -76,7 +80,7 @@ export function createCatalogCandidateSelectionContext(candidates: CatalogCandid
       },
       currency: candidate.currency,
       roomaiSellingPrice: candidate.roomaiSellingPrice,
-    };
+    });
   });
 
   return { aiCandidates, selectionByKey };

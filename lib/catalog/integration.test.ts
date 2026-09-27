@@ -139,3 +139,61 @@ test("null or invented catalog candidate keys do not resolve to catalog ids", ()
   assert.equal(specification.furniture[0].catalogSelectionKey, null);
   assert.equal(specification.furniture[1].catalogSelectionKey, null);
 });
+
+test("AI catalog candidate contract exposes only generation-safe fields", () => {
+  const { aiCandidates } =
+    catalogSelectionTestHelpers.createCatalogCandidateSelectionContext([
+      candidate("variant-safe"),
+    ]);
+
+  assert.equal(aiCandidates.length, 1);
+
+  assert.deepEqual(Object.keys(aiCandidates[0]).sort(), [
+    "catalogSelectionKey",
+    "configuration",
+    "currency",
+    "dimensions",
+    "furnitureTypeCode",
+    "furnitureTypeName",
+    "normalizedColor",
+    "normalizedMaterial",
+    "normalizedStyle",
+    "productTitle",
+    "roomaiDescription",
+    "roomaiSellingPrice",
+    "seatingCapacity",
+  ].sort());
+
+  assert.equal("productId" in aiCandidates[0], false);
+  assert.equal("variantId" in aiCandidates[0], false);
+  assert.equal("vendorName" in aiCandidates[0], false);
+  assert.equal("productUrl" in aiCandidates[0], false);
+  assert.equal("primaryImageUrl" in aiCandidates[0], false);
+  assert.equal("normalizedAvailability" in aiCandidates[0], false);
+  assert.equal("deliveryText" in aiCandidates[0], false);
+  assert.equal("vendorDataCheckedAt" in aiCandidates[0], false);
+  assert.equal("roomaiPriceCalculatedAt" in aiCandidates[0], false);
+});
+
+test("AI catalog candidate uses opaque key while server retains catalog identity", () => {
+  const { aiCandidates, selectionByKey } =
+    catalogSelectionTestHelpers.createCatalogCandidateSelectionContext([
+      candidate("variant-contract"),
+    ]);
+
+  assert.equal(aiCandidates[0].catalogSelectionKey, "candidate_1");
+
+  assert.deepEqual(selectionByKey["candidate_1"], {
+    catalogProductId: "product-variant-contract",
+    catalogProductVariantId: "variant-contract",
+  });
+
+  assert.equal(
+    JSON.stringify(aiCandidates).includes("product-variant-contract"),
+    false,
+  );
+  assert.equal(
+    JSON.stringify(aiCandidates).includes("variant-contract"),
+    false,
+  );
+});
