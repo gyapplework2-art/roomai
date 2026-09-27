@@ -247,3 +247,80 @@ test("dispatcher is deterministic for identical input", () => {
 
   assert.deepEqual(first, second);
 });
+
+test("dispatches dining table chair relationship", () => {
+  const result = evaluateFurnitureRelationship(
+    input("dining_table", "dining_chair", 180, 50),
+  );
+
+  assert.ok(result);
+  assert.equal(result.relationshipId, "dining_table_chair");
+  assert.deepEqual(result.roleIds, [
+    "role-dining_table",
+    "role-dining_chair",
+  ]);
+});
+
+test("dining dispatcher result conforms to the E.1 relationship schema", () => {
+  const result = evaluateFurnitureRelationship(
+    input("dining_table", "dining_chair", 180, 50),
+  );
+
+  assert.ok(result);
+  assert.doesNotThrow(() =>
+    relationshipEvaluationSchema.parse(result),
+  );
+});
+
+test("normalizes dining relationship dimensions into E.1 dimension names", () => {
+  const result = evaluateFurnitureRelationship(
+    input("dining_table", "dining_chair", 180, 50),
+  );
+
+  assert.ok(result);
+  assert.deepEqual(
+    result.dimensions.map((dimension) => dimension.dimension),
+    [
+      "scale_proportion",
+      "functional_relationship",
+      "color_harmony",
+    ],
+  );
+});
+
+test("preserves canonical dining role order when arguments are reversed", () => {
+  const result = evaluateFurnitureRelationship(
+    input("dining_chair", "dining_table", 50, 180),
+  );
+
+  assert.ok(result);
+  assert.equal(result.relationshipId, "dining_table_chair");
+  assert.deepEqual(result.roleIds, [
+    "role-dining_table",
+    "role-dining_chair",
+  ]);
+});
+
+test("dining relationship output does not expose catalog identity", () => {
+  const result = evaluateFurnitureRelationship(
+    input("dining_table", "dining_chair", 180, 50),
+  );
+
+  assert.ok(result);
+
+  const serialized = JSON.stringify(result);
+
+  assert.equal(serialized.includes("vendorName"), false);
+  assert.equal(serialized.includes("productUrl"), false);
+  assert.equal(serialized.includes("productId"), false);
+  assert.equal(serialized.includes("variantId"), false);
+});
+
+test("registered dining pair is no longer treated as unsupported", () => {
+  const result = evaluateFurnitureRelationship(
+    input("dining_table", "dining_chair", 180, 50),
+  );
+
+  assert.notEqual(result, null);
+  assert.equal(result?.relationshipId, "dining_table_chair");
+});

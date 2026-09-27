@@ -1,4 +1,5 @@
 import type { CatalogCandidate } from "@/lib/catalog/schema";
+import { evaluateDiningTableChairRelationship } from "@/lib/design-intelligence/dining-table-chair-relationship";
 import {
   relationshipEvaluationSchema,
   type DesignRole,
@@ -59,8 +60,48 @@ function evaluateSofaRug(
   });
 }
 
+function evaluateDiningTableChair(
+  input: RelationshipInput,
+): RelationshipEvaluation | null {
+  const result = evaluateDiningTableChairRelationship(
+    input.firstRole,
+    input.firstCandidate,
+    input.secondRole,
+    input.secondCandidate,
+  );
+
+  if (!result.applicable) return null;
+
+  return relationshipEvaluationSchema.parse({
+    relationshipId: "dining_table_chair",
+    roleIds: [
+      result.tableRoleId,
+      result.chairRoleId,
+    ],
+    dimensions: [
+      {
+        dimension: "scale_proportion",
+        compatibility: result.scaleProportion.compatibility,
+        reasons: result.scaleProportion.reasons,
+      },
+      {
+        dimension: "functional_relationship",
+        compatibility: result.functionalRelationship.compatibility,
+        reasons: result.functionalRelationship.reasons,
+      },
+      {
+        dimension: "color_harmony",
+        compatibility: result.colorHarmony.compatibility,
+        reasons: result.colorHarmony.reasons,
+      },
+    ],
+    overallCompatibility: result.overallCompatibility,
+  });
+}
+
 const RELATIONSHIP_EVALUATORS: readonly RelationshipEvaluator[] = [
   evaluateSofaRug,
+  evaluateDiningTableChair,
 ];
 
 export function evaluateFurnitureRelationship(
