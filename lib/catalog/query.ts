@@ -129,7 +129,10 @@ export async function findCatalogProducts(input: CatalogQuery): Promise<CatalogC
     request = request.lte("height_cm", query.maxHeightCm);
   }
 
-  const { data, error } = await request.limit(query.limit);
+  const { data, error } = await request
+    .order("roomai_selling_price", { ascending: true, nullsFirst: false })
+    .order("variant_id", { ascending: true })
+    .limit(query.limit);
   if (error) {
     console.error("Catalog query failed", {
       code: error.code,
