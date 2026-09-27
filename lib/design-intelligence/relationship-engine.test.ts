@@ -324,3 +324,84 @@ test("registered dining pair is no longer treated as unsupported", () => {
   assert.notEqual(result, null);
   assert.equal(result?.relationshipId, "dining_table_chair");
 });
+
+test("dispatches bed nightstand relationship", () => {
+  const result = evaluateFurnitureRelationship(
+    input("bed", "nightstand", 165, 50),
+  );
+
+  assert.ok(result);
+  assert.equal(result.relationshipId, "bed_nightstand");
+  assert.deepEqual(result.roleIds, [
+    "role-bed",
+    "role-nightstand",
+  ]);
+});
+
+test("bed nightstand dispatcher result conforms to E.1 relationship schema", () => {
+  const result = evaluateFurnitureRelationship(
+    input("bed", "nightstand", 165, 50),
+  );
+
+  assert.ok(result);
+  assert.doesNotThrow(() =>
+    relationshipEvaluationSchema.parse(result),
+  );
+});
+
+test("normalizes bed nightstand dimensions into E.1 dimension names", () => {
+  const result = evaluateFurnitureRelationship(
+    input("bed", "nightstand", 165, 50),
+  );
+
+  assert.ok(result);
+  assert.deepEqual(
+    result.dimensions.map((dimension) => dimension.dimension),
+    [
+      "scale_proportion",
+      "functional_relationship",
+      "color_harmony",
+    ],
+  );
+});
+
+test("preserves canonical bed nightstand role order when arguments are reversed", () => {
+  const result = evaluateFurnitureRelationship(
+    input("nightstand", "bed", 50, 165),
+  );
+
+  assert.ok(result);
+  assert.equal(result.relationshipId, "bed_nightstand");
+  assert.deepEqual(result.roleIds, [
+    "role-bed",
+    "role-nightstand",
+  ]);
+});
+
+test("supports bed frame alias through relationship registry", () => {
+  const result = evaluateFurnitureRelationship(
+    input("bed_frame", "nightstand", 165, 50),
+  );
+
+  assert.ok(result);
+  assert.equal(result.relationshipId, "bed_nightstand");
+  assert.deepEqual(result.roleIds, [
+    "role-bed_frame",
+    "role-nightstand",
+  ]);
+});
+
+test("bed nightstand relationship output does not expose catalog identity", () => {
+  const result = evaluateFurnitureRelationship(
+    input("bed", "nightstand", 165, 50),
+  );
+
+  assert.ok(result);
+
+  const serialized = JSON.stringify(result);
+
+  assert.equal(serialized.includes("vendorName"), false);
+  assert.equal(serialized.includes("productUrl"), false);
+  assert.equal(serialized.includes("productId"), false);
+  assert.equal(serialized.includes("variantId"), false);
+});

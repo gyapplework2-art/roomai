@@ -1,4 +1,5 @@
 import type { CatalogCandidate } from "@/lib/catalog/schema";
+import { evaluateBedNightstandRelationship } from "@/lib/design-intelligence/bed-nightstand-relationship";
 import { evaluateDiningTableChairRelationship } from "@/lib/design-intelligence/dining-table-chair-relationship";
 import {
   relationshipEvaluationSchema,
@@ -99,9 +100,49 @@ function evaluateDiningTableChair(
   });
 }
 
+function evaluateBedNightstand(
+  input: RelationshipInput,
+): RelationshipEvaluation | null {
+  const result = evaluateBedNightstandRelationship(
+    input.firstRole,
+    input.firstCandidate,
+    input.secondRole,
+    input.secondCandidate,
+  );
+
+  if (!result.applicable) return null;
+
+  return relationshipEvaluationSchema.parse({
+    relationshipId: "bed_nightstand",
+    roleIds: [
+      result.bedRoleId,
+      result.nightstandRoleId,
+    ],
+    dimensions: [
+      {
+        dimension: "scale_proportion",
+        compatibility: result.scaleProportion.compatibility,
+        reasons: result.scaleProportion.reasons,
+      },
+      {
+        dimension: "functional_relationship",
+        compatibility: result.functionalRelationship.compatibility,
+        reasons: result.functionalRelationship.reasons,
+      },
+      {
+        dimension: "color_harmony",
+        compatibility: result.colorHarmony.compatibility,
+        reasons: result.colorHarmony.reasons,
+      },
+    ],
+    overallCompatibility: result.overallCompatibility,
+  });
+}
+
 const RELATIONSHIP_EVALUATORS: readonly RelationshipEvaluator[] = [
   evaluateSofaRug,
   evaluateDiningTableChair,
+  evaluateBedNightstand,
 ];
 
 export function evaluateFurnitureRelationship(
