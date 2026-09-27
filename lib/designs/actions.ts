@@ -1,5 +1,6 @@
 "use server";
 
+import { selectDiverseCatalogCandidates } from "@/lib/catalog/candidate-diversity";
 import { rankCatalogCandidates } from "@/lib/catalog/candidate-ranking";
 import { findCatalogProducts } from "@/lib/catalog/query";
 import {
@@ -144,9 +145,10 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
     );
     const catalogCandidates = deduplicateCatalogCandidates(
       catalogResults.flatMap((candidates) =>
-        rankCatalogCandidates(candidates)
-          .slice(0, 10)
-          .map((ranked) => ranked.candidate),
+        selectDiverseCatalogCandidates(
+          rankCatalogCandidates(candidates),
+          10,
+        ).map((ranked) => ranked.candidate),
       ),
     );
     const generation = await generateDesignSpecification(
