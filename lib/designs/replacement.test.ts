@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { CatalogCandidate } from "@/lib/catalog/schema";
+import { buildAttributeAwareCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
+import type { RoomAIAlternative } from "@/lib/catalog/customer-alternative";
+import { normalizeFurnitureAttributes } from "@/lib/design-intelligence/furniture-attributes";
 import {
   createReplacementClone,
   REPLACEMENT_VISUALIZATION_WARNING,
@@ -179,4 +182,52 @@ test("replacement keeps design specification consistent without changing placeme
   assert.equal(furniture.reasoning, "Original reasoning");
   assert.equal(result.specification.furniture[1].name, "Table");
   assert.ok(result.specification.warnings.includes(REPLACEMENT_VISUALIZATION_WARNING));
+});
+
+test("attribute-aware alternative selection retains identity for a versioned furniture replacement", async () => {
+  const current = { ...candidate, productId: "old-product", variantId: "old-variant" };
+  const different = { ...candidate, productId: "other-product", variantId: "a-different" };
+  const contexts = new Map([[current.variantId, {
+    currentObjectId: objects[0].id,
+    designObject: { x_cm: objects[0].x_cm, y_cm: objects[0].y_cm, rotation_degrees: objects[0].rotation_degrees },
+    geometry: {
+      schemaVersion: "1.0" as const,
+      shapeType: "rectangle" as const,
+      templateTransform: { rotationDegrees: 0 as const, mirroredHorizontal: false, mirroredVertical: false },
+      ceilingHeightCm: 250,
+      vertices: [
+        { id: "a", xCm: 0, yCm: 0 }, { id: "b", xCm: 500, yCm: 0 },
+        { id: "c", xCm: 500, yCm: 400 }, { id: "d", xCm: 0, yCm: 400 },
+      ],
+      wallSegments: [
+        { id: "ab", startVertexId: "a", endVertexId: "b" },
+        { id: "bc", startVertexId: "b", endVertexId: "c" },
+        { id: "cd", startVertexId: "c", endVertexId: "d" },
+        { id: "da", startVertexId: "d", endVertexId: "a" },
+      ],
+    },
+    openings: [],
+    neighbors: objects,
+  }]]);
+  const identity = new Map<RoomAIAlternative, string>();
+  const alternatives = await buildAttributeAwareCustomerAlternativeMap(
+    [current], [different, candidate], 2, contexts, identity,
+    async (ids, capacities) => new Map(ids.map((id) => [id, normalizeFurnitureAttributes(
+      { seatingCapacity: capacities.get(id) ?? null },
+      { sourceAttributes: { "Arm Style": id === different.variantId ? "Track Arms" : "Rolled Arms" } },
+    )])),
+  );
+  const selected = alternatives.get(current.variantId)?.[0];
+  assert.ok(selected);
+  const selectedId = identity.get(selected);
+  assert.equal(selectedId, candidate.variantId);
+  assert.equal(JSON.stringify(selected).includes(selectedId), false);
+
+  const resolvedCandidate = [different, candidate].find((item) => item.variantId === selectedId);
+  assert.ok(resolvedCandidate);
+  const clone = createReplacementClone("design-new", specification, objects, objects[0].id, resolvedCandidate);
+  assert.ok(clone);
+  assert.equal(clone.objects[0].catalog_product_variant_id, candidate.variantId);
+  assert.deepEqual(clone.specification.furniture[0].position, specification.furniture[0].position);
+  assert.equal(clone.objects[1].name, objects[1].name);
 });

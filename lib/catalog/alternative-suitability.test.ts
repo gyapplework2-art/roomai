@@ -247,3 +247,60 @@ test("customer alternatives omit attribute evidence along with catalog and suita
     assert.equal(serialized.includes(internalField), false, internalField);
   }
 });
+
+test("known detailed matches resolve equal-score ties without changing suitability scores", () => {
+  const current = candidate("current");
+  const match = candidate("z-match");
+  const different = candidate("a-different");
+  const attributes = new Map([
+    [current.variantId, normalizeFurnitureAttributes(current, { sourceAttributes: { "Arm Style": "Rolled Arms" } })],
+    [match.variantId, normalizeFurnitureAttributes(match, { sourceAttributes: { "Arm Style": "Rolled Arms" } })],
+    [different.variantId, normalizeFurnitureAttributes(different, { sourceAttributes: { "Arm Style": "Track Arms" } })],
+  ]);
+  const baseline = rankSuitableCatalogAlternatives(current, [match, different], context, 2);
+  const ranked = rankSuitableCatalogAlternatives(current, [match, different], context, 2, attributes);
+
+  assert.deepEqual(baseline.map((item) => item.candidate.variantId), ["a-different", "z-match"]);
+  assert.deepEqual(ranked.map((item) => item.candidate.variantId), ["z-match", "a-different"]);
+  assert.equal(ranked[0].suitabilityScore, ranked[1].suitabilityScore);
+  assert.equal(ranked[0].suitabilityScore, baseline[0].suitabilityScore);
+  assert.equal(ranked[0].aestheticCompatibility.furnitureAttributeCompatibility?.overallCompatibility, "compatible");
+  assert.equal(ranked[1].aestheticCompatibility.furnitureAttributeCompatibility?.overallCompatibility, "mixed");
+  assert.deepEqual(rankSuitableCatalogAlternatives(current, [match, different], context, 2, attributes), ranked);
+});
+
+test("unknown detail stays neutral, and existing commercial differences and spatial exclusion still prevail", () => {
+  const current = candidate("current");
+  const rich = candidate("rich", { roomaiSellingPrice: 3200 });
+  const close = candidate("close");
+  const oversized = candidate("oversized", { widthCm: 490 });
+  const attributes = new Map([
+    [current.variantId, normalizeFurnitureAttributes(current, { sourceAttributes: { "Arm Style": "Rolled Arms" } })],
+    [rich.variantId, normalizeFurnitureAttributes(rich, { sourceAttributes: { "Arm Style": "Rolled Arms" } })],
+    [oversized.variantId, normalizeFurnitureAttributes(oversized, { sourceAttributes: { "Arm Style": "Rolled Arms" } })],
+  ]);
+  const ranked = rankSuitableCatalogAlternatives(current, [rich, close, oversized], context, 4, attributes);
+  const baseline = rankSuitableCatalogAlternatives(current, [rich, close, oversized], context, 4);
+
+  assert.deepEqual(ranked.map((item) => item.candidate.variantId), baseline.map((item) => item.candidate.variantId));
+  assert.deepEqual(ranked.map((item) => item.suitabilityScore), baseline.map((item) => item.suitabilityScore));
+  assert.equal(ranked[0].aestheticCompatibility.furnitureAttributeCompatibility, undefined);
+  assert.equal(ranked.some((item) => item.candidate.variantId === "oversized"), false);
+});
+
+test("attribute-poor candidates remain eligible and unknown ranks ahead of a known mismatch on equal scores", () => {
+  const current = candidate("current");
+  const poor = candidate("z-unknown");
+  const different = candidate("a-different");
+  const attributes = new Map([
+    [current.variantId, normalizeFurnitureAttributes(current, { sourceAttributes: { "Arm Style": "Rolled Arms" } })],
+    [different.variantId, normalizeFurnitureAttributes(different, { sourceAttributes: { "Arm Style": "Track Arms" } })],
+  ]);
+  const ranked = rankSuitableCatalogAlternatives(current, [different, poor], context, 2, attributes);
+
+  assert.deepEqual(ranked.map((item) => item.candidate.variantId), ["z-unknown", "a-different"]);
+  assert.equal(ranked[0].aestheticCompatibility.furnitureAttributeCompatibility, undefined);
+  assert.equal(ranked[1].aestheticCompatibility.furnitureAttributeCompatibility?.overallCompatibility, "mixed");
+  assert.equal(ranked[0].suitabilityScore, ranked[1].suitabilityScore);
+  assert.equal(ranked[0].spatialCompatibility.status, "compatible");
+});

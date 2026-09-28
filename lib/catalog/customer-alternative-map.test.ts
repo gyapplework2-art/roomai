@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
+import {
+  buildAttributeAwareCustomerAlternativeMap,
+  buildCustomerAlternativeMap,
+} from "@/lib/catalog/customer-alternative-map";
 import type { RoomAIAlternative } from "@/lib/catalog/customer-alternative";
 import type { AlternativeSuitabilityContext } from "@/lib/catalog/alternative-suitability";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
 import type { RoomGeometry } from "@/lib/geometry/types";
+import { normalizeFurnitureAttributes } from "@/lib/design-intelligence/furniture-attributes";
 
 function candidate(
   variantId: string,
@@ -245,4 +249,56 @@ test("replacement identity remains outside the customer-safe alternative contrac
   assert.equal(serialized.includes("productId"), false);
   assert.equal(serialized.includes("vendorName"), false);
   assert.equal(serialized.includes("productUrl"), false);
+});
+
+test("async customer map fetches one shared batch and ranks each candidate using its own attributes", async () => {
+  const current = candidate("current");
+  const match = candidate("z-match", { productTitle: "Matching sofa" });
+  const different = candidate("a-different", { productTitle: "Different sofa" });
+  const otherCurrent = candidate("other-current", { furnitureTypeCode: "rug" });
+  const otherAlternative = candidate("other-alternative", { furnitureTypeCode: "rug" });
+  const pool = [current, match, different, otherCurrent, otherAlternative];
+  const snapshot = structuredClone(pool);
+  const contexts = new Map([
+    [current.variantId, suitabilityContext()],
+    [otherCurrent.variantId, suitabilityContext()],
+  ]);
+  const identity = new Map<RoomAIAlternative, string>();
+  const calls: string[][] = [];
+  const loader = async (ids: readonly string[], capacities: ReadonlyMap<string, number | null>) => {
+    calls.push([...ids]);
+    return new Map(ids.map((id) => [id, normalizeFurnitureAttributes(
+      { seatingCapacity: capacities.get(id) ?? null },
+      { sourceAttributes: { "Arm Style": id === "a-different" ? "Track Arms" : "Rolled Arms" } },
+    )]));
+  };
+  const result = await buildAttributeAwareCustomerAlternativeMap(
+    [current, otherCurrent], pool, 4, contexts, identity, loader,
+  );
+
+  assert.deepEqual(calls, [["current", "z-match", "a-different", "other-current", "other-alternative"]]);
+  assert.deepEqual(result.get(current.variantId)?.map((item) => item.product.name), ["Matching sofa", "Different sofa"]);
+  assert.equal(result.get(otherCurrent.variantId)?.[0]?.product.name, "Product other-alternative");
+  const displayed = result.get(current.variantId)?.[0];
+  assert.ok(displayed);
+  assert.equal(identity.get(displayed), match.variantId);
+  const serialized = JSON.stringify([...result.values()].flat());
+  for (const field of ["variantId", "productId", "vendorName", "productUrl", "suitabilityScore", "spatialCompatibility", "aestheticCompatibility", "furnitureAttributeCompatibility", "armStyle", "normalized_attributes"]) {
+    assert.equal(serialized.includes(field), false, field);
+  }
+  assert.deepEqual(pool, snapshot);
+  const again = await buildAttributeAwareCustomerAlternativeMap([current, otherCurrent], pool, 4, contexts, undefined, loader);
+  assert.deepEqual(result, again);
+});
+
+test("async customer map preserves alternatives when attributes are absent or lookup fails", async () => {
+  const current = candidate("current");
+  const alternative = candidate("alternative");
+  const contexts = new Map([[current.variantId, suitabilityContext()]]);
+  const baseline = buildCustomerAlternativeMap([current], [alternative], 4, contexts);
+  const missing = await buildAttributeAwareCustomerAlternativeMap([current], [alternative], 4, contexts, undefined, async () => new Map());
+  const failed = await buildAttributeAwareCustomerAlternativeMap([current], [alternative], 4, contexts, undefined, async () => { throw new Error("attributes unavailable"); });
+
+  assert.deepEqual(missing, baseline);
+  assert.deepEqual(failed, baseline);
 });

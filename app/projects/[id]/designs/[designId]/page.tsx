@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { VisualizationSubmitButton } from "@/components/visualization-submit-button";
 import type { RoomAIAlternative } from "@/lib/catalog/customer-alternative";
-import { buildCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
+import { buildAttributeAwareCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
 import { toRoomAIProduct } from "@/lib/catalog/customer-product";
 import type { AlternativeSuitabilityContext } from "@/lib/catalog/alternative-suitability";
 import {
@@ -344,7 +344,7 @@ export default async function DesignPage({
     try {
       const currentCatalogCandidates = [...catalogByVariantId.values()];
       const candidatePool = await findCatalogProductsForAlternativeContexts(currentCatalogCandidates);
-      alternativesByVariantId = buildCustomerAlternativeMap(
+      alternativesByVariantId = await buildAttributeAwareCustomerAlternativeMap(
         currentCatalogCandidates,
         candidatePool,
         4,

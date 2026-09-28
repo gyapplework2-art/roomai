@@ -80,10 +80,20 @@ export function rankSuitableCatalogAlternatives(
   alternatives: CatalogCandidate[],
   context: AlternativeSuitabilityContext,
   limit: number,
+  attributesByVariantId?: ReadonlyMap<string, FurnitureDesignAttributes>,
 ): SuitableCatalogAlternative[] {
   return alternatives
     .flatMap((alternative) => {
-      const result = evaluateCatalogAlternativeSuitability(current, alternative, context);
+      const currentAttributes = attributesByVariantId?.get(current.variantId);
+      const alternativeAttributes = attributesByVariantId?.get(alternative.variantId);
+      const result = evaluateCatalogAlternativeSuitability(
+        current,
+        alternative,
+        context,
+        currentAttributes && alternativeAttributes
+          ? { current: currentAttributes, alternative: alternativeAttributes }
+          : undefined,
+      );
       return result ? [result] : [];
     })
     .sort((first, second) => {
@@ -91,6 +101,16 @@ export function rankSuitableCatalogAlternatives(
         return second.suitabilityScore - first.suitabilityScore;
       }
       if (second.score !== first.score) return second.score - first.score;
+      if (attributesByVariantId) {
+        const firstEvidence = first.aestheticCompatibility.furnitureAttributeCompatibility?.overallCompatibility ?? "unknown";
+        const secondEvidence = second.aestheticCompatibility.furnitureAttributeCompatibility?.overallCompatibility ?? "unknown";
+        if (firstEvidence !== secondEvidence) {
+          if (firstEvidence === "compatible") return -1;
+          if (secondEvidence === "compatible") return 1;
+          if (firstEvidence === "unknown") return -1;
+          if (secondEvidence === "unknown") return 1;
+        }
+      }
       return first.candidate.variantId.localeCompare(second.candidate.variantId);
     })
     .slice(0, limit);
