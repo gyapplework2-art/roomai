@@ -46,6 +46,21 @@ def canonicalize_article_product_url(url: str) -> tuple[str, str] | None:
     return urlunsplit((parsed.scheme, parsed.netloc.lower(), canonical_path, "", "")), match.group(1)
 
 
+def discover_article_sofas(
+    html: str,
+    source_page_url: str,
+    *,
+    limit: int = 30,
+    discovered_at: datetime | None = None,
+    approved_host: str | None = None,
+) -> DiscoveryResult:
+    """Discover bounded Article US sofa links from one supplied page."""
+    return discover_article_category(
+        html, source_page_url, source_category=ARTICLE_SOFA_CATEGORY,
+        limit=limit, discovered_at=discovered_at, approved_host=approved_host,
+    )
+
+
 def discover_article_category(
     html: str,
     source_page_url: str,
@@ -53,8 +68,9 @@ def discover_article_category(
     source_category: str,
     limit: int = 30,
     discovered_at: datetime | None = None,
+    approved_host: str | None = None,
 ) -> DiscoveryResult:
-    """Discover bounded Article product links from one approved category page."""
+    """Discover Article product links for one explicitly approved category."""
     if not source_category.strip():
         raise ValueError("source_category is required.")
     if limit < 1:
@@ -70,6 +86,9 @@ def discover_article_category(
             invalid_urls_skipped += 1
             continue
         product_url, page_id = canonical
+        if approved_host is not None and urlsplit(product_url).hostname != approved_host:
+            invalid_urls_skipped += 1
+            continue
         if page_id in seen_page_ids:
             duplicates_skipped += 1
             continue
@@ -89,29 +108,13 @@ def discover_article_category(
     return DiscoveryResult(tuple(candidates), limit, duplicates_skipped, invalid_urls_skipped)
 
 
-def discover_article_sofas(
-    html: str,
-    source_page_url: str,
-    *,
-    limit: int = 30,
-    discovered_at: datetime | None = None,
-) -> DiscoveryResult:
-    """Backward-compatible Article US sofa category discovery."""
-    return discover_article_category(
-        html,
-        source_page_url,
-        source_category=ARTICLE_SOFA_CATEGORY,
-        limit=limit,
-        discovered_at=discovered_at,
-    )
-
-
 def discover_article_sofa_urls(
     urls: list[str],
     source_page_url: str,
     *,
     limit: int = 30,
     discovered_at: datetime | None = None,
+    approved_host: str | None = None,
 ) -> DiscoveryResult:
     """Build candidates from explicit sitemap URLs using the same canonicalization rules."""
     return discover_article_sofas(
@@ -119,4 +122,5 @@ def discover_article_sofa_urls(
         source_page_url,
         limit=limit,
         discovered_at=discovered_at,
+        approved_host=approved_host,
     )

@@ -5,6 +5,9 @@ import json
 import pytest
 
 from crawler.jobs import expand_catalog
+from crawler.core.catalog_coverage import US_INITIAL_COVERAGE_PLAN
+from crawler.core.fetcher import FetchResult
+from datetime import datetime, timezone
 
 
 def run(coroutine):
@@ -283,3 +286,122 @@ def test_expansion_source_status_is_bounded_with_expansion_targets():
         item["furniture_type_code"]
         for item in targets
     ]
+
+
+def _inventory_with_only_sofa_deficit(tmp_path):
+    inventory = tmp_path / "inventory.json"
+    counts = {
+        f"{target.market_code}:{target.furniture_type_code}": target.target_product_count
+        for target in US_INITIAL_COVERAGE_PLAN.targets
+    }
+    counts["US:sofa"] = 29
+    inventory.write_text(json.dumps(counts))
+    return inventory
+
+
+def test_expand_discovers_only_approved_deficit_sources_and_deduplicates_urls(monkeypatch, tmp_path):
+    class FakeFetcher:
+        def __init__(self):
+            self.calls = []
+
+        async def fetch(self, url):
+            self.calls.append(url)
+            html = """<a href="https://unapproved.example/product/102/sofa">Other host</a>
+                <a href="/product/101/sofa?ref=list">One</a>
+                <a href="/product/101/sofa">Duplicate</a>
+                <a href="/browse/other">Not a product</a>"""
+            return FetchResult(url, url, 200, html, "text/html", datetime(2026, 9, 27, tzinfo=timezone.utc), 1)
+
+    fetcher = FakeFetcher()
+    monkeypatch.setattr(expand_catalog, "HttpFetcher", lambda: fetcher)
+    result = run(expand_catalog.run(make_args(
+        stage="expand", inventory=_inventory_with_only_sofa_deficit(tmp_path),
+        target_limit=1, limit=1,
+    )))
+
+    assert result["dry_run"] is True
+    assert result["summary"] == {"targets_attempted": 1, "candidates_discovered": 1}
+    assert result["targets"][0]["coverage"]["furniture_type_code"] == "sofa"
+    assert result["targets"][0]["status"] == "candidates_found"
+    assert [item["product_url"] for item in result["targets"][0]["candidates"]] == [
+        "https://www.article.com/product/101/sofa"
+    ]
+    assert fetcher.calls == ["https://www.article.com/browse/1/sofas?collectionId=603"]
+
+
+def test_expand_reports_missing_and_unavailable_sources_without_fabricating_candidates(monkeypatch):
+    class UnavailableFetcher:
+        async def fetch(self, url):
+            return FetchResult(url, url, 503, None, "text/html", datetime(2026, 9, 27, tzinfo=timezone.utc), 1)
+
+    monkeypatch.setattr(expand_catalog, "HttpFetcher", UnavailableFetcher)
+    result = run(expand_catalog.run(make_args(stage="expand", target_limit=1, limit=3)))
+
+    assert result["targets"][0]["status"] == "no_approved_source"
+    assert result["targets"][0]["coverage"]["furniture_type_code"] == "accent_chair"
+    assert next(item for item in result["targets"] if item.get("source"))["status"] == "source_unavailable"
+    assert result["summary"]["candidates_discovered"] == 0
+    assert all(not item["candidates"] for item in result["targets"])
+
+
+def test_expand_rejects_writes_invalid_limits_and_unapproved_sources(monkeypatch):
+    with pytest.raises(ValueError, match="discovery-only"):
+        run(expand_catalog.run(make_args(stage="expand", execute=True)))
+    with pytest.raises(ValueError, match="target-limit"):
+        run(expand_catalog.run(make_args(stage="expand", target_limit=0)))
+    with pytest.raises(ValueError, match="not approved"):
+        run(expand_catalog.run(make_args(stage="discover", source_url="https://unapproved.example/sofas")))
+
+
+def test_discover_uses_approved_target_category_without_product_ingestion(monkeypatch):
+    class FakeFetcher:
+        def __init__(self):
+            self.calls = []
+
+        async def fetch(self, url):
+            self.calls.append(url)
+            return FetchResult(url, url, 200, '<a href="/product/101/table">Table</a>', "text/html", datetime(2026, 9, 27, tzinfo=timezone.utc), 1)
+
+    fetcher = FakeFetcher()
+    monkeypatch.setattr(expand_catalog, "HttpFetcher", lambda: fetcher)
+    result = run(expand_catalog.run(make_args(stage="discover", furniture_type="coffee_table", limit=2)))
+
+    assert result["summary"]["furniture_type"] == "coffee_table"
+    assert result["summary"]["category"] == "coffee_tables"
+    assert result["candidates"][0]["source_category"] == "coffee_tables"
+    assert fetcher.calls == ["https://www.article.com/browse/21/tables-coffee-tables"]
+
+
+def test_expand_uses_live_inventory_deficits_without_fetching_met_targets(monkeypatch):
+    class FakeInventoryTransport:
+        pass
+
+    async def fake_load_inventory_counts(transport):
+        assert isinstance(transport, FakeInventoryTransport)
+        counts = {
+            (target.market_code, target.furniture_type_code): target.target_product_count
+            for target in US_INITIAL_COVERAGE_PLAN.targets
+        }
+        counts[("US", "sectional_sofa")] = 29
+        return counts
+
+    class FakeFetcher:
+        def __init__(self):
+            self.calls = []
+
+        async def fetch(self, url):
+            self.calls.append(url)
+            return FetchResult(url, url, 200, '<a href="/product/202/sectional">Sectional</a>', "text/html", datetime(2026, 9, 27, tzinfo=timezone.utc), 1)
+
+    fetcher = FakeFetcher()
+    monkeypatch.setattr(expand_catalog, "HttpxCatalogInventoryTransport", FakeInventoryTransport)
+    monkeypatch.setattr(expand_catalog, "load_inventory_counts", fake_load_inventory_counts)
+    monkeypatch.setattr(expand_catalog, "HttpFetcher", lambda: fetcher)
+
+    result = run(expand_catalog.run(make_args(stage="expand", live_inventory=True, target_limit=1, limit=5)))
+
+    assert [item["coverage"]["furniture_type_code"] for item in result["targets"]] == ["sectional_sofa"]
+    assert result["targets"][0]["coverage"]["actual_product_count"] == 29
+    assert result["coverage"]["expansion_targets"][0]["furniture_type_code"] == "sectional_sofa"
+    assert result["summary"]["candidates_discovered"] == 1
+    assert fetcher.calls == ["https://www.article.com/browse/27/sofas-sectionals"]

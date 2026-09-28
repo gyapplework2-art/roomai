@@ -150,21 +150,11 @@ def select_expansion_targets(
     limit: int | None = None,
 ) -> tuple[CoverageReportRow, ...]:
     """Return unmet coverage targets in deterministic expansion order."""
-
     if limit is not None and limit < 1:
         raise ValueError("Expansion target limit must be at least 1.")
 
-    status_order = {
-        "empty": 0,
-        "under_target": 1,
-    }
-
-    candidates = [
-        row
-        for row in report.rows
-        if row.status != "target_met"
-    ]
-
+    status_order = {"empty": 0, "under_target": 1}
+    candidates = [row for row in report.rows if row.status != "target_met"]
     ordered = tuple(sorted(
         candidates,
         key=lambda row: (
@@ -176,5 +166,4 @@ def select_expansion_targets(
             row.market_code,
         ),
     ))
-
     return ordered if limit is None else ordered[:limit]
