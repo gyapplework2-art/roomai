@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { CatalogCandidate } from "@/lib/catalog/schema";
-import { buildAttributeAwareCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
+import { buildAttributeAwareCustomerAlternativeMap, buildCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
 import type { RoomAIAlternative } from "@/lib/catalog/customer-alternative";
 import { normalizeFurnitureAttributes } from "@/lib/design-intelligence/furniture-attributes";
 import {
@@ -187,6 +187,11 @@ test("replacement keeps design specification consistent without changing placeme
 test("attribute-aware alternative selection retains identity for a versioned furniture replacement", async () => {
   const current = { ...candidate, productId: "old-product", variantId: "old-variant" };
   const different = { ...candidate, productId: "other-product", variantId: "a-different" };
+  const oversized = { ...candidate, productId: "oversized-product", variantId: "oversized", widthCm: 490 };
+  const pool = [different, candidate, oversized];
+  const originalObjects = structuredClone(objects);
+  const originalSpecification = structuredClone(specification);
+  const originalPool = structuredClone(pool);
   const contexts = new Map([[current.variantId, {
     currentObjectId: objects[0].id,
     designObject: { x_cm: objects[0].x_cm, y_cm: objects[0].y_cm, rotation_degrees: objects[0].rotation_degrees },
@@ -209,25 +214,78 @@ test("attribute-aware alternative selection retains identity for a versioned fur
     openings: [],
     neighbors: objects,
   }]]);
+  const baselineIdentity = new Map<RoomAIAlternative, string>();
+  const baseline = buildCustomerAlternativeMap([current], pool, 3, contexts, baselineIdentity);
+  assert.equal(baseline.get(current.variantId)?.length, 2);
+  assert.equal(baselineIdentity.get(baseline.get(current.variantId)![0]), different.variantId);
+
   const identity = new Map<RoomAIAlternative, string>();
+  const requestedVariantIds: string[][] = [];
   const alternatives = await buildAttributeAwareCustomerAlternativeMap(
-    [current], [different, candidate], 2, contexts, identity,
-    async (ids, capacities) => new Map(ids.map((id) => [id, normalizeFurnitureAttributes(
-      { seatingCapacity: capacities.get(id) ?? null },
-      { sourceAttributes: { "Arm Style": id === different.variantId ? "Track Arms" : "Rolled Arms" } },
-    )])),
+    [current], pool, 3, contexts, identity,
+    async (ids, capacities) => {
+      requestedVariantIds.push([...ids]);
+      return new Map(ids.map((id) => [id, normalizeFurnitureAttributes(
+        { seatingCapacity: capacities.get(id) ?? null },
+        { normalizedAttributes: { arm_type: id === different.variantId ? "track" : "rolled", seat_depth: 55.88 } },
+      )]));
+    },
   );
+  assert.deepEqual(requestedVariantIds, [[current.variantId, different.variantId, candidate.variantId, oversized.variantId]]);
+  assert.equal(alternatives.get(current.variantId)?.length, 2);
   const selected = alternatives.get(current.variantId)?.[0];
   assert.ok(selected);
   const selectedId = identity.get(selected);
   assert.equal(selectedId, candidate.variantId);
-  assert.equal(JSON.stringify(selected).includes(selectedId), false);
+  assert.equal(identity.get(alternatives.get(current.variantId)![1]), different.variantId);
+  assert.equal([...identity.values()].includes(oversized.variantId), false);
+  const serialized = JSON.stringify(alternatives.get(current.variantId));
+  for (const internalField of [
+    "vendorName", "productUrl", "productId", "variantId", "catalog_product_id",
+    "suitabilityScore", "scoreBreakdown", "spatialCompatibility", "aestheticCompatibility",
+    "furnitureAttributeCompatibility", "armStyle", "normalized_attributes",
+  ]) {
+    assert.equal(serialized.includes(internalField), false, internalField);
+  }
+  for (const internalValue of [candidate.variantId, candidate.productId, candidate.vendorName, candidate.productUrl]) {
+    assert.equal(serialized.includes(internalValue), false);
+  }
 
-  const resolvedCandidate = [different, candidate].find((item) => item.variantId === selectedId);
+  const resolvedCandidate = pool.find((item) => item.variantId === selectedId);
   assert.ok(resolvedCandidate);
   const clone = createReplacementClone("design-new", specification, objects, objects[0].id, resolvedCandidate);
   assert.ok(clone);
   assert.equal(clone.objects[0].catalog_product_variant_id, candidate.variantId);
+  assert.equal(clone.objects[0].catalog_product_id, candidate.productId);
+  assert.equal(clone.objects[0].object_type, objects[0].object_type);
+  assert.equal(clone.objects[0].category, objects[0].category);
+  assert.equal(clone.objects[0].rotation_degrees, objects[0].rotation_degrees);
+  assert.deepEqual(
+    [clone.objects[0].x_cm, clone.objects[0].y_cm, clone.objects[0].z_cm],
+    [objects[0].x_cm, objects[0].y_cm, objects[0].z_cm],
+  );
+  assert.deepEqual(
+    [clone.objects[0].width_cm, clone.objects[0].depth_cm, clone.objects[0].height_cm],
+    [candidate.widthCm, candidate.depthCm, candidate.heightCm],
+  );
   assert.deepEqual(clone.specification.furniture[0].position, specification.furniture[0].position);
-  assert.equal(clone.objects[1].name, objects[1].name);
+  assert.deepEqual(clone.specification.furniture[0].dimensions, { widthCm: candidate.widthCm, depthCm: candidate.depthCm, heightCm: candidate.heightCm });
+  assert.equal(clone.specification.furniture[0].name, candidate.productTitle);
+  assert.equal(clone.specification.furniture[0].material, candidate.normalizedMaterial);
+  assert.equal(clone.specification.furniture[0].color, candidate.normalizedColor);
+  assert.deepEqual(clone.specification.furniture[1], specification.furniture[1]);
+  assert.equal(clone.specification.furniture[0].catalogSelectionKey, null);
+  assert.ok(clone.specification.warnings.includes(REPLACEMENT_VISUALIZATION_WARNING));
+  const unaffectedObject = Object.fromEntries(
+    Object.entries(objects[1]).filter(([key]) => key !== "id" && key !== "created_at"),
+  );
+  assert.deepEqual(clone.objects[1], { ...unaffectedObject, design_id: "design-new" });
+  assert.deepEqual(objects, originalObjects);
+  assert.deepEqual(specification, originalSpecification);
+  assert.deepEqual(pool, originalPool);
+
+  const withoutAttributes = await buildAttributeAwareCustomerAlternativeMap(
+    [current], pool, 3, contexts, undefined, async () => new Map(),
+  );
+  assert.deepEqual(withoutAttributes, baseline);
 });
