@@ -1,11 +1,9 @@
 "use server";
 
-import { selectDiverseCatalogCandidates } from "@/lib/catalog/candidate-diversity";
-import { rankCatalogCandidates } from "@/lib/catalog/candidate-ranking";
 import { findCatalogProducts } from "@/lib/catalog/query";
 import {
-  deduplicateCatalogCandidates,
   resolveFurnitureTypeCode,
+  selectDesignCatalogCandidates,
   type CatalogSelectionsByObjectId,
 } from "@/lib/catalog/integration";
 import { generateDesignSpecification, createDesignBrief } from "@/lib/designs/generation";
@@ -143,14 +141,7 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
         }
       }),
     );
-    const catalogCandidates = deduplicateCatalogCandidates(
-      catalogResults.flatMap((candidates) =>
-        selectDiverseCatalogCandidates(
-          rankCatalogCandidates(candidates),
-          10,
-        ).map((ranked) => ranked.candidate),
-      ),
-    );
+    const catalogCandidates = selectDesignCatalogCandidates(catalogResults);
     const generation = await generateDesignSpecification(
       brief,
       catalogCandidates,

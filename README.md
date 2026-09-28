@@ -46,6 +46,8 @@ RoomAI's catalog expansion is a US-first, bounded pipeline:
 
 Run `python3 -m crawler.jobs.expand_catalog plan --market US` for a local report. The pipeline is vendor/market isolated, uses bounded and manually approved discovery sources, and keeps vendor facts internal. It does not perform anti-bot or CAPTCHA bypass, automatic mass publication, or uncontrolled crawling. Design intelligence remains separate from crawler and catalog intake.
 
+For E.9-B, review the JSON from an approved `discover` or discovery-only `expand` run, then pass it to `python3 -m crawler.jobs.expand_catalog intake --vendor article --market US --input discovery.json` or `python3 -m crawler.jobs.expand_catalog persist --vendor article --market US --input discovery.json`. Persistence defaults to a no-write preflight with natural keys and intended table operations; execution requires both `--execute` and `CATALOG_ALLOW_WRITES=true`. Existing-product refresh is separate: `python3 -m crawler.jobs.refresh_products --market article-us --limit 10` also defaults to dry-run. No batch publication occurs in this pipeline.
+
 ## Demo
 
 You can view a fully working demo at [demo-nextjs-with-supabase.vercel.app](https://demo-nextjs-with-supabase.vercel.app/).

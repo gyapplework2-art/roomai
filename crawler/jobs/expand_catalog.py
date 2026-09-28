@@ -10,9 +10,10 @@ from crawler.core.catalog_batch import intake_candidates, persist_batch, promote
 from crawler.core.catalog_coverage import US_INITIAL_COVERAGE_PLAN, build_coverage_report, select_expansion_targets
 from crawler.core.catalog_inventory import HttpxCatalogInventoryTransport, load_inventory_counts
 from crawler.core.config import get_settings
+from crawler.core.dry_run import build_catalog_dry_run
 from crawler.core.fetcher import HttpFetcher
 from crawler.core.supabase_repository import HttpxPostgrestTransport, SupabaseCatalogExecutor
-from crawler.discovery.article import DiscoveryResult, discover_article_category, discover_article_sofa_urls
+from crawler.discovery.article import DiscoveryResult, canonicalize_article_product_url, discover_article_category, discover_article_sofa_urls
 from crawler.discovery.source_map import ApprovedDiscoverySource, approved_sources_for_target, select_approved_source
 from crawler.discovery.sitemap import extract_sitemap_urls
 from crawler.vendors.article import ArticleVendorAdapter
@@ -54,9 +55,43 @@ def _validate_limit(limit: int) -> None:
 def _load_candidates(path: Path) -> list[dict[str, object]]:
     document = json.loads(path.read_text())
     candidates = document.get("candidates") if isinstance(document, dict) else None
+    if isinstance(document, dict) and document.get("stage") == "expand":
+        targets = document.get("targets")
+        if not isinstance(targets, list) or not all(isinstance(target, dict) and isinstance(target.get("candidates"), list) for target in targets):
+            raise ValueError("Expansion input must contain target candidate lists.")
+        candidates = [candidate for target in targets for candidate in target["candidates"]]
     if not isinstance(candidates, list) or not all(isinstance(item, dict) for item in candidates):
         raise ValueError("Input must contain a candidates list.")
     return candidates
+
+
+def _approved_candidates(candidates: list[dict[str, object]], *, vendor: str, market: str) -> list[dict[str, object]]:
+    approved = [
+        source
+        for target in US_INITIAL_COVERAGE_PLAN.targets
+        for source in approved_sources_for_target(target.market_code, target.furniture_type_code)
+        if source.vendor == vendor and source.vendor_market_code == market
+    ]
+    validated: list[dict[str, object]] = []
+    seen_urls: set[str] = set()
+    for candidate in candidates:
+        source = next((item for item in approved if
+            candidate.get("source_page_url") == item.source_url
+            and candidate.get("vendor") == "Article"
+            and candidate.get("vendor_market_code") == item.vendor_market_code
+            and candidate.get("source_category") == item.source_category
+        ), None)
+        product_url = candidate.get("product_url")
+        if source is None or not isinstance(product_url, str):
+            raise ValueError("Candidate is not from an approved discovery source.")
+        canonical = canonicalize_article_product_url(product_url) if vendor == "article" else None
+        if canonical is None or urlsplit(canonical[0]).hostname != urlsplit(source.source_url).hostname:
+            raise ValueError("Candidate product URL is not approved for its source.")
+        if canonical[0] in seen_urls:
+            continue
+        seen_urls.add(canonical[0])
+        validated.append({**candidate, "product_url": canonical[0], "furniture_type_code": source.furniture_type_code})
+    return validated
 
 
 def _write(document: dict[str, object], output: Path | None) -> dict[str, object]:
@@ -214,13 +249,18 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
     if args.stage in {"intake", "persist"}:
         if args.input is None:
             raise ValueError(f"{args.stage} requires --input.")
-        candidates = _load_candidates(args.input)
+        candidates = _approved_candidates(_load_candidates(args.input), vendor=args.vendor, market=args.market)
         if args.vendor == "ikea" and args.market != "US":
             raise ValueError("IKEA intake is currently limited to the configured US adapter market.")
         adapter = ArticleVendorAdapter(args.market) if args.vendor == "article" else IkeaVendorAdapter(args.market)
-        intake = await intake_candidates(candidates, adapter=adapter, limit=args.limit)
+        intake = await intake_candidates(candidates, adapter=adapter, fetcher=HttpFetcher(), limit=args.limit)
         if args.stage == "intake":
             return _write({"stage": "intake", **intake.as_dict()}, args.output)
+        preflight = [
+            {"product_natural_key": item.plan.product_natural_key, **build_catalog_dry_run(item.plan).as_dict()}
+            for item in intake.ready
+            if item.plan is not None
+        ]
         settings = get_settings()
         executor = SupabaseCatalogExecutor(
             HttpxPostgrestTransport(settings) if args.execute and settings.catalog_allow_writes else None,
@@ -232,7 +272,7 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
             executor=executor,
             execute=args.execute,
         )
-        return _write({"stage": "persist", "intake": intake.as_dict(), "persistence": persistence.as_dict()}, args.output)
+        return _write({"stage": "persist", "intake": intake.as_dict(), "preflight": preflight, "persistence": persistence.as_dict()}, args.output)
 
     if args.stage == "promote":
         if not args.variant_id:

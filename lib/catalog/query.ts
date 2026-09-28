@@ -12,9 +12,7 @@ const PUBLIC_CATALOG_VIEW = "roomai_catalog_public";
 
 function createCatalogClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const secret =
-    process.env.SUPABASE_SECRET_KEY ??
-    process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const secret = process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !secret) {
     throw new CatalogQueryError("Catalog server configuration is missing.");
   }

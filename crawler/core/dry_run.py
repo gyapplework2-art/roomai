@@ -35,7 +35,7 @@ class CatalogDryRun:
 def _country_defaults(country_code: str) -> dict[str, str] | None:
     """Known market configuration required by catalog_vendor_markets writes."""
     if country_code == "US":
-        return {"default_locale": "en-US"}
+        return {"default_locale": "en-US", "currency_code": "USD"}
     return None
 
 
@@ -49,6 +49,11 @@ def build_catalog_dry_run(plan: CatalogPersistencePlan) -> CatalogDryRun:
         blocking_reasons.append("missing_vendor_market")
     if country_defaults is None:
         blocking_reasons.append("missing_country_configuration")
+    elif plan.vendor_market.currency_code != country_defaults["currency_code"] or any(
+        variant.offer is not None and variant.offer.get("currency") != country_defaults["currency_code"]
+        for variant in plan.variants
+    ):
+        blocking_reasons.append("unsupported_market_currency")
     if not plan.product_natural_key or not plan.product.get("source_product_name"):
         blocking_reasons.append("missing_product_identity")
     if not plan.variants:
@@ -58,6 +63,9 @@ def build_catalog_dry_run(plan: CatalogPersistencePlan) -> CatalogDryRun:
         for variant in plan.variants
     ):
         blocking_reasons.append("missing_variant_identity")
+    variant_keys = [variant.natural_key for variant in plan.variants]
+    if len(variant_keys) != len(set(variant_keys)):
+        blocking_reasons.append("duplicate_variant_identity")
 
     vendor_reference = f"vendor:{plan.vendor.slug}"
     country_reference = f"country:{plan.vendor_market.country_code}"

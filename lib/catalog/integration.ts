@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import type { CatalogCandidate } from "@/lib/catalog/schema";
+import { rankCatalogCandidates } from "@/lib/catalog/candidate-ranking";
+import { selectDiverseCatalogCandidates } from "@/lib/catalog/candidate-diversity";
 
 export type CatalogSelectionIdentity = {
   catalogProductId: string;
@@ -51,6 +53,16 @@ export function deduplicateCatalogCandidates(candidates: CatalogCandidate[]): Ca
     seenVariantIds.add(candidate.variantId);
     return true;
   });
+}
+
+export function selectDesignCatalogCandidates(
+  candidateGroups: CatalogCandidate[][],
+  limitPerType = 10,
+): CatalogCandidate[] {
+  return deduplicateCatalogCandidates(candidateGroups.flatMap((candidates) =>
+    selectDiverseCatalogCandidates(rankCatalogCandidates(candidates), limitPerType)
+      .map((ranked) => ranked.candidate),
+  ));
 }
 
 export function createCatalogCandidateSelectionContext(candidates: CatalogCandidate[]) {

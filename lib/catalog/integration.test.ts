@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { deduplicateCatalogCandidates, resolveFurnitureTypeCode } from "@/lib/catalog/integration";
+import {
+  aiCatalogCandidateSchema,
+  deduplicateCatalogCandidates,
+  resolveFurnitureTypeCode,
+  selectDesignCatalogCandidates,
+} from "@/lib/catalog/integration";
 import { catalogSelectionTestHelpers } from "@/lib/designs/generation";
 import { furnitureObjectSchema } from "@/lib/designs/schema";
 import type { DesignSpecification } from "@/lib/designs/types";
@@ -51,6 +56,27 @@ test("deduplicates catalog candidates by variantId", () => {
   const second = candidate("variant-2");
 
   assert.deepEqual(deduplicateCatalogCandidates([first, duplicate, second]), [first, second]);
+});
+
+test("design candidate selection ranks the larger pool and favors distinct products before extra variants", () => {
+  const incomplete = Array.from({ length: 10 }, (_, index) => ({
+    ...candidate(`early-${index}`),
+    productId: "shared-product",
+    widthCm: null,
+    depthCm: null,
+    heightCm: null,
+    roomaiSellingPrice: null,
+  }));
+  const best = candidate("late-best");
+  const chosen = selectDesignCatalogCandidates([[
+    ...incomplete,
+    best,
+    { ...best, productTitle: "Duplicate variant" },
+  ]], 2);
+
+  assert.deepEqual(chosen.map((item) => item.variantId), ["late-best", "early-0"]);
+  assert.equal(chosen[0].productTitle, best.productTitle);
+  assert.equal(selectDesignCatalogCandidates([[best], [best]]).length, 1);
 });
 
 test("furniture schema does not expose catalog identity fields", () => {
@@ -141,59 +167,36 @@ test("null or invented catalog candidate keys do not resolve to catalog ids", ()
 });
 
 test("AI catalog candidate contract exposes only generation-safe fields", () => {
-  const { aiCandidates } =
-    catalogSelectionTestHelpers.createCatalogCandidateSelectionContext([
-      candidate("variant-safe"),
-    ]);
+  const { aiCandidates } = catalogSelectionTestHelpers.createCatalogCandidateSelectionContext([
+    candidate("variant-safe"),
+  ]);
 
   assert.equal(aiCandidates.length, 1);
-
   assert.deepEqual(Object.keys(aiCandidates[0]).sort(), [
-    "catalogSelectionKey",
-    "configuration",
-    "currency",
-    "dimensions",
-    "furnitureTypeCode",
-    "furnitureTypeName",
-    "normalizedColor",
-    "normalizedMaterial",
-    "normalizedStyle",
-    "productTitle",
-    "roomaiDescription",
-    "roomaiSellingPrice",
+    "catalogSelectionKey", "configuration", "currency", "dimensions",
+    "furnitureTypeCode", "furnitureTypeName", "normalizedColor", "normalizedMaterial",
+    "normalizedStyle", "productTitle", "roomaiDescription", "roomaiSellingPrice",
     "seatingCapacity",
   ].sort());
-
-  assert.equal("productId" in aiCandidates[0], false);
-  assert.equal("variantId" in aiCandidates[0], false);
-  assert.equal("vendorName" in aiCandidates[0], false);
-  assert.equal("productUrl" in aiCandidates[0], false);
-  assert.equal("primaryImageUrl" in aiCandidates[0], false);
-  assert.equal("normalizedAvailability" in aiCandidates[0], false);
-  assert.equal("deliveryText" in aiCandidates[0], false);
-  assert.equal("vendorDataCheckedAt" in aiCandidates[0], false);
-  assert.equal("roomaiPriceCalculatedAt" in aiCandidates[0], false);
+  for (const internal of [
+    "productId", "variantId", "vendorName", "productUrl", "primaryImageUrl",
+    "normalizedAvailability", "deliveryText", "vendorDataCheckedAt", "roomaiPriceCalculatedAt",
+  ]) {
+    assert.equal(internal in aiCandidates[0], false);
+  }
+  assert.equal(aiCatalogCandidateSchema.safeParse({ ...aiCandidates[0], vendorName: "Internal Vendor" }).success, false);
 });
 
-test("AI catalog candidate uses opaque key while server retains catalog identity", () => {
-  const { aiCandidates, selectionByKey } =
-    catalogSelectionTestHelpers.createCatalogCandidateSelectionContext([
-      candidate("variant-contract"),
-    ]);
+test("AI catalog candidate uses an opaque key while server retains catalog identity", () => {
+  const { aiCandidates, selectionByKey } = catalogSelectionTestHelpers.createCatalogCandidateSelectionContext([
+    candidate("variant-contract"),
+  ]);
 
   assert.equal(aiCandidates[0].catalogSelectionKey, "candidate_1");
-
   assert.deepEqual(selectionByKey["candidate_1"], {
     catalogProductId: "product-variant-contract",
     catalogProductVariantId: "variant-contract",
   });
-
-  assert.equal(
-    JSON.stringify(aiCandidates).includes("product-variant-contract"),
-    false,
-  );
-  assert.equal(
-    JSON.stringify(aiCandidates).includes("variant-contract"),
-    false,
-  );
+  assert.equal(JSON.stringify(aiCandidates).includes("product-variant-contract"), false);
+  assert.equal(JSON.stringify(aiCandidates).includes("variant-contract"), false);
 });

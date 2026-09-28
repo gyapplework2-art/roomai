@@ -53,6 +53,26 @@ def test_plan_preserves_offer_images_and_excludes_roomai_pricing():
     assert "customer_price" not in variant.offer
 
 
+def test_changed_vendor_offer_keeps_product_and_variant_identity():
+    product = article_product("normal_sofa.html")
+    variant = product.variants[0]
+    changed = product.model_copy(update={
+        "variants": [variant.model_copy(update={
+            "current_offer": variant.current_offer.model_copy(update={"vendor_sale_price": 1499.0}),
+        })],
+    })
+
+    before = build_persistence_plan(product)
+    after = build_persistence_plan(changed)
+
+    assert (before.vendor_market.market_code, before.product_natural_key) == (
+        after.vendor_market.market_code, after.product_natural_key,
+    )
+    assert [item.natural_key for item in before.variants] == [item.natural_key for item in after.variants]
+    assert before.variants[0].offer["vendor_sale_price"] == 1699.0
+    assert after.variants[0].offer["vendor_sale_price"] == 1499.0
+
+
 def test_unknown_taxonomy_stages_for_review_without_identity_merge():
     plan = build_persistence_plan(article_product("identity_and_related_sofa.html"))
 

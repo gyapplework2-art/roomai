@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -295,3 +296,27 @@ def test_limit_below_one_is_rejected():
                 transport=FakeCandidateTransport(RestResponse(200, [])),
             )
         )
+
+
+def test_refresh_cli_forwards_market_limit_and_explicit_execute_only(monkeypatch, capsys):
+    from crawler.jobs import refresh_products
+
+    calls = []
+
+    class FakeReport:
+        def as_dict(self):
+            return {"writes_enabled": False, "items": []}
+
+    async def fake_refresh_catalog(*, market_code, limit, execute):
+        calls.append((market_code, limit, execute))
+        return FakeReport()
+
+    monkeypatch.setattr(refresh_products, "refresh_catalog", fake_refresh_catalog)
+    monkeypatch.setattr("sys.argv", ["refresh_products", "--market", "ikea-us", "--limit", "2"])
+    refresh_products.main()
+    assert calls == [("ikea-us", 2, False)]
+    assert json.loads(capsys.readouterr().out) == {"items": [], "writes_enabled": False}
+
+    monkeypatch.setattr("sys.argv", ["refresh_products", "--execute"])
+    refresh_products.main()
+    assert calls[-1] == ("article-us", refresh_products.DEFAULT_REFRESH_LIMIT, True)

@@ -80,14 +80,9 @@ def normalize_material(value: str | None) -> str | None:
     normalized = _normalized_words(value)
     if _COMPOSITE_MATERIAL.search(normalized):
         return None
-
-    single_material_percentage = re.fullmatch(
-        r"100\s*%\s+(.+)",
-        normalized,
-    )
+    single_material_percentage = re.fullmatch(r"100\s*%\s+(.+)", normalized)
     if single_material_percentage:
         normalized = single_material_percentage.group(1).strip()
-
     return _MATERIAL_VALUES.get(normalized)
 
 

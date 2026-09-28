@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from dataclasses import replace
 from pathlib import Path
 
 from crawler.core.dry_run import build_catalog_dry_run
@@ -123,3 +124,25 @@ def test_variant_name_or_source_index_fallback_is_not_a_database_safe_identity()
     )
 
     assert "missing_variant_identity" in build_catalog_dry_run(blocked_plan).blocking_reasons
+
+
+def test_us_market_or_variant_offer_with_unsupported_currency_cannot_write():
+    plan = article_plan()
+    mismatched_market = replace(plan, vendor_market=replace(plan.vendor_market, currency_code="CAD"))
+    variant = plan.variants[0]
+    mismatched_offer = replace(plan, variants=(replace(variant, offer={**variant.offer, "currency": "CAD"}),))
+
+    for candidate in (mismatched_market, mismatched_offer):
+        dry_run = build_catalog_dry_run(candidate)
+        assert dry_run.write_allowed is False
+        assert "unsupported_market_currency" in dry_run.blocking_reasons
+
+
+def test_duplicate_variant_natural_key_cannot_write_two_rows_for_one_product():
+    plan = article_plan()
+    duplicate = replace(plan, variants=(plan.variants[0], plan.variants[0]))
+
+    preflight = build_catalog_dry_run(duplicate)
+
+    assert preflight.write_allowed is False
+    assert "duplicate_variant_identity" in preflight.blocking_reasons

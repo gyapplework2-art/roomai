@@ -3,12 +3,14 @@
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import urlsplit
 
 from crawler.core.catalog_promotion import PromotionReport, promote_catalog_variant
 from crawler.core.config import CrawlerSettings, get_settings
 from crawler.core.fetcher import FetchResult, HttpFetcher
 from crawler.core.normalizer import normalize_product
 from crawler.core.persistence import CatalogPersistencePlan, build_persistence_plan
+from crawler.core.product_resolver import propose_resolution
 from crawler.core.supabase_repository import ExecutionReport, SupabaseCatalogExecutor
 from crawler.core.validator import validate_product
 from crawler.models.product import CatalogProduct
@@ -34,6 +36,7 @@ class BatchIntakeItem:
     product: CatalogProduct | None = None
     plan: CatalogPersistencePlan | None = None
     review_reasons: tuple[str, ...] = ()
+    resolution_proposals: tuple[dict[str, object], ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -44,6 +47,7 @@ class BatchIntakeItem:
             "review_reasons": list(self.review_reasons),
             "product_name": self.product.source_product_name if self.product else None,
             "product_natural_key": self.plan.product_natural_key if self.plan else None,
+            "resolution_proposals": [dict(proposal) for proposal in self.resolution_proposals],
         }
 
 
@@ -89,6 +93,7 @@ async def intake_candidates(
         raise ValueError(f"Batch limit must be between 1 and {MAX_BATCH_LIMIT}.")
     active_fetcher = fetcher or HttpFetcher()
     items: list[BatchIntakeItem] = []
+    previous_products: list[CatalogProduct] = []
 
     for candidate in list(candidates)[:limit]:
         product_url = candidate.get("product_url")
@@ -102,6 +107,9 @@ async def intake_candidates(
             continue
         if not fetch_result.succeeded or fetch_result.response_text is None:
             items.append(BatchIntakeItem("failed", product_url, "fetch", "fetch_failed"))
+            continue
+        if urlsplit(fetch_result.final_url).hostname != urlsplit(product_url).hostname:
+            items.append(BatchIntakeItem("failed", product_url, "fetch", "redirected_outside_source_host"))
             continue
         try:
             product = adapter.parse_product(fetch_result.response_text, fetch_result.final_url, fetch_result.fetched_at)
@@ -118,7 +126,24 @@ async def intake_candidates(
         except Exception:
             items.append(BatchIntakeItem("failed", product_url, "normalization", "normalization_or_plan_failed"))
             continue
-        reasons = tuple(dict.fromkeys((*normalized.review_reasons, *plan.review_reasons)))
+        expected_type = candidate.get("furniture_type_code")
+        type_review = ("furniture_type_mismatch",) if (
+            isinstance(expected_type, str)
+            and plan.canonical_furniture_type_code != expected_type
+        ) else ()
+        reasons = tuple(dict.fromkeys((*normalized.review_reasons, *plan.review_reasons, *type_review)))
+        proposals = tuple(
+            {
+                "relationship_type": proposal.relationship_type,
+                "confidence": proposal.confidence,
+                "requires_review": proposal.requires_review,
+                "evidence_codes": [evidence.code for evidence in proposal.evidence],
+            }
+            for previous in previous_products
+            if previous.vendor_market_code == product.vendor_market_code
+            and previous.source_payload.get("vendor") == product.source_payload.get("vendor")
+            for proposal in [propose_resolution(previous, product)]
+        )
         items.append(BatchIntakeItem(
             "review_required" if reasons else "ready",
             product.product_url,
@@ -126,7 +151,9 @@ async def intake_candidates(
             review_reasons=reasons,
             product=product,
             plan=plan,
+            resolution_proposals=proposals,
         ))
+        previous_products.append(product)
     return BatchIntakeResult(tuple(items), limit)
 
 
@@ -167,9 +194,10 @@ async def persist_batch(
 ) -> BatchPersistenceResult:
     """Apply plans independently through the existing guarded executor."""
     results: list[BatchPersistenceItem] = []
-    seen_natural_keys: set[str] = set()
+    seen_natural_keys: set[tuple[str, str]] = set()
     for plan in plans:
-        if plan.product_natural_key in seen_natural_keys:
+        identity = (plan.vendor_market.market_code, plan.product_natural_key)
+        if identity in seen_natural_keys:
             report = ExecutionReport(
                 execution_requested=execute,
                 writes_enabled=False,
@@ -177,7 +205,7 @@ async def persist_batch(
             )
             results.append(BatchPersistenceItem(plan.product_natural_key, "skipped", report))
             continue
-        seen_natural_keys.add(plan.product_natural_key)
+        seen_natural_keys.add(identity)
         try:
             report = await executor.execute(plan, execution_requested=execute)
         except Exception:
@@ -195,7 +223,10 @@ async def persist_batch(
         else:
             outcome = "planned"
         results.append(BatchPersistenceItem(plan.product_natural_key, outcome, report))
-    return BatchPersistenceResult(tuple(results), dry_run=not execute)
+    return BatchPersistenceResult(
+        tuple(results),
+        dry_run=not any(item.report.write_attempted for item in results),
+    )
 
 
 @dataclass(frozen=True)
