@@ -1,7 +1,7 @@
 import { getWallEndpoints, getWallLengthCm } from "@/lib/geometry/dimensions";
 import { isPointInsideOrOnPolygon } from "@/lib/geometry/point-in-polygon";
 import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
-import type { FurniturePlanItem } from "@/lib/furniture-planning/types";
+import type { AnyFurniturePlanItem, FurniturePlanItem } from "@/lib/furniture-planning/types";
 import type { NormalizedFurniturePlan, NormalizedPlanItem } from "@/lib/furniture-planning/normalize-plan";
 
 export const DOOR_EDGE_CLEARANCE_CM = 15;
@@ -18,6 +18,7 @@ export type RoomConstraintConflict = {
 };
 
 export type RoomConstrainedPlanItem = NormalizedPlanItem & {
+  item: AnyFurniturePlanItem;
   roomConstraint: {
     selectedWallId: string | null;
     selectedSpan: Span | null;

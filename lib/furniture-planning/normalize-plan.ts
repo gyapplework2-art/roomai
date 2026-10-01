@@ -1,10 +1,14 @@
-import type { FurniturePlan, FurniturePlanItem } from "@/lib/furniture-planning/types";
+import type {
+  AnyFurniturePlan,
+  AnyFurniturePlanItem,
+  FurniturePlanItem,
+} from "@/lib/furniture-planning/types";
 import { getMarketFurnitureRule } from "@/lib/furniture-planning/market-rules";
 import type { FurnitureMarket, DimensionRange, MarketFurnitureRule } from "@/lib/furniture-planning/market-types";
 import { intersectRanges } from "@/lib/furniture-planning/range-utils";
 
 export type NormalizedPlanItem = {
-  item: FurniturePlanItem;
+  item: AnyFurniturePlanItem;
   normalizedCategory: string;
   normalizedSubtype: string | null;
   marketRule: MarketFurnitureRule | null;
@@ -16,7 +20,7 @@ export type NormalizedPlanItem = {
 };
 
 export type NormalizedFurniturePlan = {
-  plan: FurniturePlan;
+  plan: AnyFurniturePlan;
   market: FurnitureMarket;
   items: NormalizedPlanItem[];
 };
@@ -83,7 +87,7 @@ function toPlanRange(range: { widthCm: DimensionRange; depthCm: DimensionRange; 
   };
 }
 
-export function normalizeFurniturePlanForMarket(plan: FurniturePlan, market: FurnitureMarket): NormalizedFurniturePlan {
+export function normalizeFurniturePlanForMarket(plan: AnyFurniturePlan, market: FurnitureMarket): NormalizedFurniturePlan {
   return {
     plan,
     market,

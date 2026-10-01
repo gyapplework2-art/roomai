@@ -7,12 +7,12 @@ import { validateRoomOpenings } from "@/lib/geometry/openings";
 import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
 import { createClient } from "@/lib/supabase/server";
 import { createFurniturePlanningBrief, generateFurniturePlan } from "@/lib/furniture-planning/generation";
-import type { FurniturePlan } from "@/lib/furniture-planning/types";
+import type { AnyFurniturePlan } from "@/lib/furniture-planning/types";
 import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
 import type { Tables } from "@/types/database.types";
 
 type FurniturePlanResult =
-  | { success: true; plan: FurniturePlan; geometry: RoomGeometry; openings: RoomOpening[] }
+  | { success: true; plan: AnyFurniturePlan; geometry: RoomGeometry; openings: RoomOpening[] }
   | { success: false; error: "not_found" | "missing_layout" | "invalid_layout" | "not_configured" | "provider_failure" | "invalid_response" };
 
 export async function generateFurniturePlanForProject(projectId: string): Promise<FurniturePlanResult> {
@@ -70,14 +70,13 @@ export async function generateFurniturePlanForProject(projectId: string): Promis
   if (!validateRoomOpenings(geometryParsed.data, openings).valid) return { success: false, error: "invalid_layout" };
 
   try {
-    const plan = await generateFurniturePlan(
-      createFurniturePlanningBrief(
-        projectResult.data as Tables<"projects">,
-        preferencesResult.data as Tables<"room_preferences"> | null,
-        geometryParsed.data,
-        openings,
-      ),
+    const brief = createFurniturePlanningBrief(
+      projectResult.data as Tables<"projects">,
+      preferencesResult.data as Tables<"room_preferences"> | null,
+      geometryParsed.data,
+      openings,
     );
+    const plan = await generateFurniturePlan(brief, geometryParsed.data, openings);
     return { success: true, plan, geometry: geometryParsed.data, openings };
   } catch (error) {
     if (error instanceof Error && error.message === "AI_NOT_CONFIGURED") return { success: false, error: "not_configured" };

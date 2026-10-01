@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { generateFurniturePlanForProject } from "@/lib/furniture-planning/actions";
-import type { FurniturePlan } from "@/lib/furniture-planning/types";
+import type { AnyFurniturePlan } from "@/lib/furniture-planning/types";
 import { furnitureMarkets, type FurnitureMarket } from "@/lib/furniture-planning/market-types";
 import { normalizeFurniturePlanForMarket } from "@/lib/furniture-planning/normalize-plan";
 import { constrainFurniturePlanToRoom } from "@/lib/furniture-planning/room-constraints";
@@ -24,7 +24,7 @@ function errorMessage(error: "not_found" | "missing_layout" | "invalid_layout" |
 export function FurniturePlanButton({ projectId }: { projectId: string }) {
   const [isPending, setIsPending] = useState(false);
   const [message, setMessage] = useState("");
-  const [plan, setPlan] = useState<FurniturePlan | null>(null);
+  const [plan, setPlan] = useState<AnyFurniturePlan | null>(null);
   const [market, setMarket] = useState<FurnitureMarket>("north_america");
   const [geometry, setGeometry] = useState<RoomGeometry | null>(null);
   const [openings, setOpenings] = useState<RoomOpening[]>([]);
