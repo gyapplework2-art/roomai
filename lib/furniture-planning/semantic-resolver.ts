@@ -6,6 +6,10 @@ import {
 } from "@/lib/furniture-planning/room-constraints";
 import type { FurniturePlanItemV11, FurniturePlanV11 } from "@/lib/furniture-planning/types";
 
+export const WALL_ALIGNMENT_MARGIN_CM = 10;
+export const NEAR_WALL_GAP_CM = 15;
+export const CORNER_ALIGNMENT_MARGIN_CM = 10;
+
 type Span = { startCm: number; endCm: number };
 
 function subtractIntervals(lengthCm: number, blocked: Span[]): Span[] {
@@ -38,7 +42,7 @@ function findInwardNormal(
   unitX: number,
   unitY: number,
   vertices: Vertex[],
-): { xCm: number; yCm: number } {
+): { xCm: number; yCm: number } | null {
   const normal1 = { xCm: -unitY, yCm: unitX };
   const normal2 = { xCm: unitY, yCm: -unitX };
 
@@ -71,7 +75,32 @@ function findInwardNormal(
     }
   }
 
-  return travel1 >= travel2 ? normal1 : normal2;
+  // If neither candidate demonstrates positive interior penetration, fail safe
+  if (travel1 <= 0 && travel2 <= 0) {
+    return null;
+  }
+
+  if (travel1 > 0 && travel2 <= 0) {
+    return normal1;
+  }
+
+  if (travel2 > 0 && travel1 <= 0) {
+    return normal2;
+  }
+
+  if (travel1 > travel2) {
+    return normal1;
+  }
+
+  if (travel2 > travel1) {
+    return normal2;
+  }
+
+  // Deterministic tie-breaker: prefer candidate with larger x component, then larger y component
+  if (normal1.xCm !== normal2.xCm) {
+    return normal1.xCm > normal2.xCm ? normal1 : normal2;
+  }
+  return normal1.yCm >= normal2.yCm ? normal1 : normal2;
 }
 
 export function resolveSemanticPlacement(
@@ -85,8 +114,33 @@ export function resolveSemanticPlacement(
 
   const { mode, alignment, targetWallId } = item.semanticPlacement;
 
-  // Vertical slice: AGAINST_WALL + targetWallId + CENTERED
-  if (mode !== "AGAINST_WALL" || alignment !== "CENTERED" || !targetWallId) {
+  if (!targetWallId) {
+    return { ...item };
+  }
+
+  const isAgainstWall =
+    mode === "AGAINST_WALL" &&
+    (alignment === "CENTERED" || alignment === "LEFT_ALIGNED" || alignment === "RIGHT_ALIGNED");
+
+  const isNearWall = mode === "NEAR_WALL" && alignment === "CENTERED";
+
+  const isCornerPlacement =
+    mode === "CORNER_PLACEMENT" &&
+    (alignment === "LEFT_ALIGNED" || alignment === "RIGHT_ALIGNED");
+
+  if (!isAgainstWall && !isNearWall && !isCornerPlacement) {
+    return { ...item };
+  }
+
+  const minimumWidthCm = item.sizeRange ? item.sizeRange.widthMinCm : 0;
+  const preferredPlanningWidthCm = item.sizeRange
+    ? (item.sizeRange.widthMinCm + item.sizeRange.widthMaxCm) / 2
+    : 0;
+  const planningDepthCm = item.sizeRange
+    ? (item.sizeRange.depthMinCm + item.sizeRange.depthMaxCm) / 2
+    : 0;
+
+  if (minimumWidthCm <= 0 || preferredPlanningWidthCm <= 0 || planningDepthCm <= 0) {
     return { ...item };
   }
 
@@ -118,21 +172,72 @@ export function resolveSemanticPlacement(
     return { ...item };
   }
 
-  const itemWidthMin = item.sizeRange ? item.sizeRange.widthMinCm : 0;
-  const fittingSpans = freeSpans.filter((span) => (span.endCm - span.startCm) >= itemWidthMin);
-  const candidateSpans = fittingSpans.length > 0 ? fittingSpans : freeSpans;
+  let spanDistance: number;
+  let inwardOffset: number;
 
-  // Pick the largest span
-  const selectedSpan = [...candidateSpans].sort(
-    (a, b) => (b.endCm - b.startCm) - (a.endCm - a.startCm)
-  )[0];
+  if (isAgainstWall || isNearWall) {
+    inwardOffset = isNearWall
+      ? NEAR_WALL_GAP_CM + planningDepthCm / 2
+      : planningDepthCm / 2;
 
-  const spanCenter = (selectedSpan.startCm + selectedSpan.endCm) / 2;
+    const margin = alignment === "CENTERED" ? 0 : WALL_ALIGNMENT_MARGIN_CM;
+    const requiredSpan = minimumWidthCm + margin;
+
+    const fittingSpans = freeSpans.filter((span) => (span.endCm - span.startCm) >= requiredSpan);
+    if (fittingSpans.length === 0) {
+      return { ...item };
+    }
+
+    const selectedSpan = [...fittingSpans].sort(
+      (a, b) => (b.endCm - b.startCm) - (a.endCm - a.startCm) || a.startCm - b.startCm
+    )[0];
+
+    const spanLength = selectedSpan.endCm - selectedSpan.startCm;
+    const availableWidthCm = spanLength - margin;
+    const resolvedPlanningWidthCm = Math.min(preferredPlanningWidthCm, availableWidthCm);
+
+    if (alignment === "CENTERED") {
+      spanDistance = (selectedSpan.startCm + selectedSpan.endCm) / 2;
+    } else if (alignment === "LEFT_ALIGNED") {
+      spanDistance = selectedSpan.startCm + WALL_ALIGNMENT_MARGIN_CM + resolvedPlanningWidthCm / 2;
+    } else {
+      // RIGHT_ALIGNED
+      spanDistance = selectedSpan.endCm - (WALL_ALIGNMENT_MARGIN_CM + resolvedPlanningWidthCm / 2);
+    }
+  } else {
+    // isCornerPlacement
+    inwardOffset = planningDepthCm / 2;
+    const requiredSpan = minimumWidthCm + CORNER_ALIGNMENT_MARGIN_CM;
+
+    if (alignment === "LEFT_ALIGNED") {
+      const cornerSpan = freeSpans.find(
+        (span) => span.startCm <= 1e-6 && span.endCm >= requiredSpan
+      );
+      if (!cornerSpan) {
+        return { ...item };
+      }
+      const availableWidthCm = cornerSpan.endCm - cornerSpan.startCm - CORNER_ALIGNMENT_MARGIN_CM;
+      const resolvedPlanningWidthCm = Math.min(preferredPlanningWidthCm, availableWidthCm);
+      spanDistance = cornerSpan.startCm + CORNER_ALIGNMENT_MARGIN_CM + resolvedPlanningWidthCm / 2;
+    } else {
+      // RIGHT_ALIGNED
+      const cornerSpan = freeSpans.find(
+        (span) => span.endCm >= wallLength - 1e-6 && span.startCm <= wallLength - requiredSpan
+      );
+      if (!cornerSpan) {
+        return { ...item };
+      }
+      const availableWidthCm = cornerSpan.endCm - cornerSpan.startCm - CORNER_ALIGNMENT_MARGIN_CM;
+      const resolvedPlanningWidthCm = Math.min(preferredPlanningWidthCm, availableWidthCm);
+      spanDistance = cornerSpan.endCm - (CORNER_ALIGNMENT_MARGIN_CM + resolvedPlanningWidthCm / 2);
+    }
+  }
+
   const unitX = (endpoints.end.xCm - endpoints.start.xCm) / wallLength;
   const unitY = (endpoints.end.yCm - endpoints.start.yCm) / wallLength;
 
-  const wallPointX = endpoints.start.xCm + unitX * spanCenter;
-  const wallPointY = endpoints.start.yCm + unitY * spanCenter;
+  const wallPointX = endpoints.start.xCm + unitX * spanDistance;
+  const wallPointY = endpoints.start.yCm + unitY * spanDistance;
 
   const inwardNormal = findInwardNormal(
     { xCm: wallPointX, yCm: wallPointY },
@@ -141,17 +246,27 @@ export function resolveSemanticPlacement(
     geometry.vertices,
   );
 
+  if (!inwardNormal) {
+    return { ...item };
+  }
+
+  const normalLength = Math.hypot(inwardNormal.xCm, inwardNormal.yCm);
+  if (normalLength <= 1e-6) {
+    return { ...item };
+  }
+
+  const approximatePosition = {
+    xCm: Math.round((wallPointX + inwardNormal.xCm * inwardOffset) * 100) / 100,
+    yCm: Math.round((wallPointY + inwardNormal.yCm * inwardOffset) * 100) / 100,
+  };
+
+  if (!isPointInsideOrOnPolygon(approximatePosition, geometry.vertices)) {
+    return { ...item };
+  }
+
   const preferredOrientationDegrees = Math.round(
     ((Math.atan2(-inwardNormal.xCm, inwardNormal.yCm) * 180) / Math.PI + 360) % 360,
   );
-
-  const depth = item.sizeRange ? (item.sizeRange.depthMinCm + item.sizeRange.depthMaxCm) / 2 : 0;
-  const halfDepth = depth / 2;
-
-  const approximatePosition = {
-    xCm: Math.round((wallPointX + inwardNormal.xCm * halfDepth) * 100) / 100,
-    yCm: Math.round((wallPointY + inwardNormal.yCm * halfDepth) * 100) / 100,
-  };
 
   return {
     ...item,
