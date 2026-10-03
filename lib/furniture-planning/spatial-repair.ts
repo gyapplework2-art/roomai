@@ -305,7 +305,8 @@ export function repairSpatialPlan<Plan extends AnyFurniturePlan>(
           relationshipContext: candidate.context, movements,
           movementCostCm: movements.reduce((sum, movement) => sum + Math.hypot(movement.offset.dxCm, movement.offset.dyCm), 0),
           iteration, violationId: selectedViolation.id, violationType: selectedViolation.type,
-          itemId: candidate.itemId, candidateIndex: index + 1, movementDistanceCm: candidate.distance, offset: candidate.offset,
+          itemId: candidate.itemId, candidateIndex: index + 1, movementDistanceCm: candidate.distance,
+          offset: { dxCm: candidate.offset.dxCm + 0, dyCm: candidate.offset.dyCm + 0 },
           accepted: false, reason: !centerInside ? "CENTER_OUTSIDE_ROOM" : !wallSpanAllowed ? "WALL_SPAN_CONSTRAINT"
             : !improving ? phase === "PHYSICAL" ? "NO_P0_IMPROVEMENT" : after.hardP0 > 0 ? "INTRODUCES_P0" : "NO_P1_IMPROVEMENT" : "NOT_SELECTED", before, after,
         };
