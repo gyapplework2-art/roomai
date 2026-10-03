@@ -9,6 +9,9 @@ import {
   WALL_ALIGNMENT_MARGIN_CM,
   NEAR_WALL_GAP_CM,
   CORNER_ALIGNMENT_MARGIN_CM,
+  IN_FRONT_OF_GAP_CM,
+  ADJACENT_GAP_CM,
+  computeFacesOrientation,
   resolveSemanticPlacement,
   resolveSemanticPlan,
 } from "./semantic-resolver";
@@ -1057,4 +1060,1251 @@ test("resolveSemanticPlan resolves all items in a v1.1 plan", () => {
   assert.equal(resolvedPlan.items[0].placement.anchorWallId, "wall-1");
   assert.equal(resolvedPlan.items[0].placement.approximatePosition?.xCm, 250);
   assert.equal(resolvedPlan.items[1].placement.anchorWallId, null);
+});
+
+// =========================================================================
+// E.10-A.2.2 Relationship Resolution Tests (A through U)
+// =========================================================================
+
+test("REL-A. coffee table FLOATING + IN_FRONT_OF wall-resolved sofa", () => {
+  const sofa = makeItem({
+    id: "sofa-1",
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: "living",
+      targetWallId: "wall-1",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const table = makeItem({
+    id: "table-1",
+    category: "coffee_table",
+    sizeRange: {
+      widthMinCm: 100,
+      widthMaxCm: 120,
+      depthMinCm: 50,
+      depthMaxCm: 70, // depth = 60
+      heightMinCm: 40,
+      heightMaxCm: 50,
+    },
+    placement: {
+      preferredZone: "living",
+      anchorWallId: null,
+      approximatePosition: { xCm: 100, yCm: 100 },
+      preferredOrientationDegrees: 45,
+    },
+    semanticPlacement: {
+      role: "COFFEE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: "living",
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "sofa-1" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Living space",
+    items: [sofa, table],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  const resolvedTable = resolved.items.find((i) => i.id === "table-1")!;
+
+  assert.equal(resolvedTable.placement.anchorWallId, null);
+  // Sofa at (250, 45). Target depth = 90, source depth = 60.
+  // distance = 45 + IN_FRONT_OF_GAP_CM + 30 = 115.
+  // y = 45 + 115 = 160.
+  assert.equal(resolvedTable.placement.approximatePosition?.xCm, 250);
+  assert.equal(resolvedTable.placement.approximatePosition?.yCm, 160);
+  assert.equal(resolvedTable.placement.preferredOrientationDegrees, 0);
+});
+
+test("REL-B. coffee table appears BEFORE sofa in plan.items: still resolves correctly", () => {
+  const sofa = makeItem({
+    id: "sofa-1",
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const table = makeItem({
+    id: "table-1",
+    sizeRange: {
+      widthMinCm: 100,
+      widthMaxCm: 120,
+      depthMinCm: 50,
+      depthMaxCm: 70,
+      heightMinCm: 40,
+      heightMaxCm: 50,
+    },
+    semanticPlacement: {
+      role: "COFFEE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "sofa-1" }],
+      fallbackModes: [],
+    },
+  });
+
+  // Table appears BEFORE sofa
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Living room",
+    items: [table, sofa],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+
+  // Preserves array ordering
+  assert.equal(resolved.items[0].id, "table-1");
+  assert.equal(resolved.items[1].id, "sofa-1");
+
+  // Both resolved properly
+  assert.equal(resolved.items[1].placement.approximatePosition?.xCm, 250);
+  assert.equal(resolved.items[1].placement.approximatePosition?.yCm, 45);
+  assert.equal(resolved.items[0].placement.approximatePosition?.xCm, 250);
+  assert.equal(resolved.items[0].placement.approximatePosition?.yCm, 160);
+});
+
+test("REL-C. resulting IN_FRONT_OF distance equals targetDepth/2 + gap + sourceDepth/2", () => {
+  const sofa = makeItem({
+    id: "sofa-1",
+    sizeRange: {
+      widthMinCm: 200,
+      widthMaxCm: 240,
+      depthMinCm: 80,
+      depthMaxCm: 100, // targetDepth = 90
+      heightMinCm: 75,
+      heightMaxCm: 90,
+    },
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const table = makeItem({
+    id: "table-1",
+    sizeRange: {
+      widthMinCm: 100,
+      widthMaxCm: 120,
+      depthMinCm: 50,
+      depthMaxCm: 70, // sourceDepth = 60
+      heightMinCm: 40,
+      heightMaxCm: 50,
+    },
+    semanticPlacement: {
+      role: "COFFEE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "sofa-1" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Testing distance",
+    items: [sofa, table],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  const resolvedSofa = resolved.items[0];
+  const resolvedTable = resolved.items[1];
+
+  const actualDistance = Math.hypot(
+    resolvedTable.placement.approximatePosition!.xCm - resolvedSofa.placement.approximatePosition!.xCm,
+    resolvedTable.placement.approximatePosition!.yCm - resolvedSofa.placement.approximatePosition!.yCm,
+  );
+
+  const expectedDistance = 90 / 2 + IN_FRONT_OF_GAP_CM + 60 / 2;
+  assert.equal(Math.round(actualDistance * 100) / 100, expectedDistance);
+});
+
+test("REL-D. IN_FRONT_OF source orientation parallel to target width axis", () => {
+  // Target sofa anchored to wall-2 (right wall at x=500). Orientation = 90 degrees.
+  const sofa = makeItem({
+    id: "sofa-1",
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-2",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const table = makeItem({
+    id: "table-1",
+    sizeRange: {
+      widthMinCm: 100,
+      widthMaxCm: 120,
+      depthMinCm: 50,
+      depthMaxCm: 70,
+      heightMinCm: 40,
+      heightMaxCm: 50,
+    },
+    semanticPlacement: {
+      role: "COFFEE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "sofa-1" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Orientation test",
+    items: [sofa, table],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  const resolvedSofa = resolved.items[0];
+  const resolvedTable = resolved.items[1];
+
+  assert.equal(resolvedSofa.placement.preferredOrientationDegrees, 90);
+  assert.equal(resolvedTable.placement.preferredOrientationDegrees, 90);
+});
+
+test("REL-E. IN_FRONT_OF missing target: compatibility placement preserved", () => {
+  const table = makeItem({
+    id: "table-1",
+    placement: {
+      preferredZone: "original_zone",
+      anchorWallId: null,
+      approximatePosition: { xCm: 200, yCm: 200 },
+      preferredOrientationDegrees: 45,
+    },
+    semanticPlacement: {
+      role: "COFFEE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: "original_zone",
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "non_existent_target" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Missing target",
+    items: [table],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  assert.deepEqual(resolved.items[0].placement, table.placement);
+});
+
+test("REL-F. IN_FRONT_OF target without reliable front direction: compatibility placement preserved", () => {
+  // Target is a floating sofa (no anchorWallId)
+  const floatingSofa = makeItem({
+    id: "sofa-floating",
+    placement: {
+      preferredZone: "center",
+      anchorWallId: null,
+      approximatePosition: { xCm: 250, yCm: 200 },
+      preferredOrientationDegrees: 0,
+    },
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: "center",
+      targetWallId: null,
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const table = makeItem({
+    id: "table-1",
+    placement: {
+      preferredZone: "center",
+      anchorWallId: null,
+      approximatePosition: { xCm: 250, yCm: 300 },
+      preferredOrientationDegrees: 0,
+    },
+    semanticPlacement: {
+      role: "COFFEE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: "center",
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "sofa-floating" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "No reliable front test",
+    items: [floatingSofa, table],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  const resolvedTable = resolved.items[1];
+  assert.deepEqual(resolvedTable.placement, table.placement);
+});
+
+test("REL-G. side table FLOATING + ADJACENT_TO sofa", () => {
+  const sofa = makeItem({
+    id: "sofa-1",
+    sizeRange: {
+      widthMinCm: 200,
+      widthMaxCm: 240, // width = 220, half = 110
+      depthMinCm: 80,
+      depthMaxCm: 100,
+      heightMinCm: 75,
+      heightMaxCm: 90,
+    },
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const sideTable = makeItem({
+    id: "side-1",
+    category: "side_table",
+    sizeRange: {
+      widthMinCm: 40,
+      widthMaxCm: 60, // width = 50, half = 25
+      depthMinCm: 40,
+      depthMaxCm: 60,
+      heightMinCm: 50,
+      heightMaxCm: 60,
+    },
+    semanticPlacement: {
+      role: "SIDE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "ADJACENT_TO", targetItemId: "sofa-1" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Adjacent test",
+    items: [sofa, sideTable],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  const resolvedSide = resolved.items[1];
+
+  assert.equal(resolvedSide.placement.anchorWallId, null);
+  assert.ok(resolvedSide.placement.approximatePosition);
+  assert.equal(isPointInsideOrOnPolygon(resolvedSide.placement.approximatePosition, geometry.vertices), true);
+  assert.equal(resolvedSide.placement.preferredOrientationDegrees, 0);
+});
+
+test("REL-H. ADJACENT_TO chooses only valid side when other side falls outside room", () => {
+  // Place sofa near left edge: wall-1 LEFT_ALIGNED
+  // Sofa center will be x = 120, y = 45. Width = 220, half-width = 110.
+  const sofa = makeItem({
+    id: "sofa-1",
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "LEFT_ALIGNED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  // Side table width = 50, half-width = 25.
+    const expectedDistance = 220 / 2 + ADJACENT_GAP_CM + 50 / 2;
+    assert.equal(expectedDistance, 145);
+  // Candidate B (left): x = 120 - 145 = -25 (OUTSIDE room < 0)
+  // Candidate A (right): x = 120 + 145 = 265 (INSIDE room)
+  const sideTable = makeItem({
+    id: "side-1",
+    sizeRange: {
+      widthMinCm: 40,
+      widthMaxCm: 60,
+      depthMinCm: 40,
+      depthMaxCm: 60,
+      heightMinCm: 50,
+      heightMaxCm: 60,
+    },
+    semanticPlacement: {
+      role: "SIDE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "ADJACENT_TO", targetItemId: "sofa-1" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Left edge sofa",
+    items: [sofa, sideTable],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  const resolvedSide = resolved.items[1];
+
+  assert.ok(resolvedSide.placement.approximatePosition);
+  assert.equal(resolvedSide.placement.approximatePosition.xCm, 265);
+  assert.equal(resolvedSide.placement.approximatePosition.yCm, 45);
+});
+
+test("REL-I. ADJACENT_TO both sides valid: deterministic repeated result", () => {
+  // Sofa centered at x = 250, y = 45.
+  // Distance = 145. Both x = 105 and x = 395 are inside room [0, 500].
+  // Stable tie-breaker chooses smaller x = 105.
+  const sofa = makeItem({
+    id: "sofa-1",
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const sideTable = makeItem({
+    id: "side-1",
+    sizeRange: {
+      widthMinCm: 40,
+      widthMaxCm: 60,
+      depthMinCm: 40,
+      depthMaxCm: 60,
+      heightMinCm: 50,
+      heightMaxCm: 60,
+    },
+    semanticPlacement: {
+      role: "SIDE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "ADJACENT_TO", targetItemId: "sofa-1" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Both sides valid",
+    items: [sofa, sideTable],
+    notes: [],
+  };
+
+  const resolvedFirst = resolveSemanticPlan(plan, geometry, []);
+  const resolvedSecond = resolveSemanticPlan(plan, geometry, []);
+
+  assert.equal(resolvedFirst.items[1].placement.approximatePosition?.xCm, 105);
+  assert.deepEqual(resolvedFirst.items[1].placement, resolvedSecond.items[1].placement);
+});
+
+test("REL-J. ADJACENT_TO neither side valid: compatibility placement preserved", () => {
+  // Use narrow 250x400 room geometry
+  const narrowGeometry = createRectangleGeometry(250, 400, 250);
+
+  // Sofa width 220 centered at x = 125.
+  // Side table distance = 145.
+  // Candidate A: 125 + 145 = 270 (> 250, outside)
+  // Candidate B: 125 - 145 = -20 (< 0, outside)
+  const sofa = makeItem({
+    id: "sofa-1",
+    sizeRange: {
+      widthMinCm: 200,
+      widthMaxCm: 240,
+      depthMinCm: 80,
+      depthMaxCm: 100,
+      heightMinCm: 75,
+      heightMaxCm: 90,
+    },
+    placement: {
+      preferredZone: null,
+      anchorWallId: "wall-1",
+      approximatePosition: { xCm: 125, yCm: 45 },
+      preferredOrientationDegrees: 0,
+    },
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const sideTable = makeItem({
+    id: "side-1",
+    placement: {
+      preferredZone: "compat",
+      anchorWallId: null,
+      approximatePosition: { xCm: 125, yCm: 250 },
+      preferredOrientationDegrees: 90,
+    },
+    sizeRange: {
+      widthMinCm: 40,
+      widthMaxCm: 60,
+      depthMinCm: 40,
+      depthMaxCm: 60,
+      heightMinCm: 50,
+      heightMaxCm: 60,
+    },
+    semanticPlacement: {
+      role: "SIDE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: "compat",
+      targetWallId: null,
+      relationships: [{ type: "ADJACENT_TO", targetItemId: "sofa-1" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Neither side valid",
+    items: [sofa, sideTable],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, narrowGeometry, []);
+  assert.deepEqual(resolved.items[1].placement, sideTable.placement);
+});
+
+test("REL-K. FACES changes orientation without moving source position", () => {
+  const sofa = makeItem({
+    id: "sofa-1",
+    placement: {
+      preferredZone: null,
+      anchorWallId: "wall-1",
+      approximatePosition: { xCm: 250, yCm: 50 },
+      preferredOrientationDegrees: 0,
+    },
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const chair = makeItem({
+    id: "chair-1",
+    placement: {
+      preferredZone: null,
+      anchorWallId: null,
+      approximatePosition: { xCm: 250, yCm: 300 },
+      preferredOrientationDegrees: 0,
+    },
+    semanticPlacement: {
+      role: "SECONDARY_SEATING",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "FACES", targetItemId: "sofa-1" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "FACES orientation test",
+    items: [sofa, chair],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  const resolvedChair = resolved.items[1];
+
+  // Position is unchanged
+  assert.deepEqual(resolvedChair.placement.approximatePosition, { xCm: 250, yCm: 300 });
+
+  // Chair is at (250, 300), sofa is at (250, 45). Vector is (0, -255), facing south (180 deg)
+  assert.equal(resolvedChair.placement.preferredOrientationDegrees, 180);
+});
+
+test("REL-L. FACES points source front axis toward target center within numerical tolerance", () => {
+  const source = { xCm: 100, yCm: 100 };
+  const target = { xCm: 300, yCm: 300 };
+
+  const angle = computeFacesOrientation(source, target);
+  assert.ok(angle !== null);
+
+  const thetaRad = (angle * Math.PI) / 180;
+  // In RoomAI convention, depth/front axis is (-sin(theta), cos(theta))
+  const frontAxis = { xCm: -Math.sin(thetaRad), yCm: Math.cos(thetaRad) };
+
+  const dx = target.xCm - source.xCm;
+  const dy = target.yCm - source.yCm;
+  const len = Math.hypot(dx, dy);
+  const targetUnit = { xCm: dx / len, yCm: dy / len };
+
+  const dot = frontAxis.xCm * targetUnit.xCm + frontAxis.yCm * targetUnit.yCm;
+  assert.ok(dot > 0.9999);
+});
+
+test("REL-M. FACES missing target: placement unchanged", () => {
+  const chair = makeItem({
+    id: "chair-1",
+    placement: {
+      preferredZone: null,
+      anchorWallId: null,
+      approximatePosition: { xCm: 250, yCm: 300 },
+      preferredOrientationDegrees: 45,
+    },
+    semanticPlacement: {
+      role: "SECONDARY_SEATING",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "FACES", targetItemId: "missing-target" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Missing target FACES",
+    items: [chair],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  assert.deepEqual(resolved.items[0].placement, chair.placement);
+});
+
+test("REL-N. wall placement + relationship: wall-derived position remains authoritative", () => {
+  // Item has mode AGAINST_WALL on wall-1, but also IN_FRONT_OF another sofa
+  const sofa = makeItem({
+    id: "sofa-1",
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "other-sofa" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Wall precedence test",
+    items: [sofa],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  // Wall-derived position (250, 45) is authoritative
+  assert.equal(resolved.items[0].placement.approximatePosition?.xCm, 250);
+  assert.equal(resolved.items[0].placement.approximatePosition?.yCm, 45);
+  assert.equal(resolved.items[0].placement.anchorWallId, "wall-1");
+});
+
+test("REL-O. wall placement + FACES: wall-derived orientation remains authoritative", () => {
+  const sofa = makeItem({
+    id: "sofa-1",
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [{ type: "FACES", targetItemId: "other-sofa" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Wall orientation precedence",
+    items: [sofa],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  // Wall-derived orientation (0 degrees) remains authoritative
+  assert.equal(resolved.items[0].placement.preferredOrientationDegrees, 0);
+});
+
+test("REL-P. dependency chain: A wall-resolved, B IN_FRONT_OF A, C ADJACENT_TO B resolves deterministically even if input array order is C, B, A", () => {
+  const itemA = makeItem({
+    id: "item-A",
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const itemB = makeItem({
+    id: "item-B",
+    sizeRange: {
+      widthMinCm: 100,
+      widthMaxCm: 120, // width = 110
+      depthMinCm: 50,
+      depthMaxCm: 70, // depth = 60
+      heightMinCm: 40,
+      heightMaxCm: 50,
+    },
+    semanticPlacement: {
+      role: "COFFEE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "item-A" }],
+      fallbackModes: [],
+    },
+  });
+
+  const itemC = makeItem({
+    id: "item-C",
+    sizeRange: {
+      widthMinCm: 40,
+      widthMaxCm: 60, // width = 50
+      depthMinCm: 40,
+      depthMaxCm: 60,
+      heightMinCm: 40,
+      heightMaxCm: 50,
+    },
+    semanticPlacement: {
+      role: "SIDE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "ADJACENT_TO", targetItemId: "item-B" }],
+      fallbackModes: [],
+    },
+  });
+
+  // Input order is C, B, A
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Dependency chain test",
+    items: [itemC, itemB, itemA],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+
+  // Output order must be exactly C, B, A
+  assert.equal(resolved.items[0].id, "item-C");
+  assert.equal(resolved.items[1].id, "item-B");
+  assert.equal(resolved.items[2].id, "item-A");
+
+  // A resolved at wall-1: (250, 45)
+  assert.equal(resolved.items[2].placement.approximatePosition?.xCm, 250);
+  assert.equal(resolved.items[2].placement.approximatePosition?.yCm, 45);
+
+  // B resolved in front of A: (250, 160)
+  assert.equal(resolved.items[1].placement.approximatePosition?.xCm, 250);
+  assert.equal(resolved.items[1].placement.approximatePosition?.yCm, 160);
+
+  // C resolved adjacent to B: x = 250 - (110/2 + 10 + 50/2) = 250 - 90 = 160, y = 160
+  assert.equal(resolved.items[0].placement.approximatePosition?.xCm, 160);
+  assert.equal(resolved.items[0].placement.approximatePosition?.yCm, 160);
+});
+
+test("REL-Q. dependency cycle: A references B, B references A terminates safely with compatibility placements", () => {
+  const itemA = makeItem({
+    id: "item-A",
+    placement: {
+      preferredZone: "compat-A",
+      anchorWallId: null,
+      approximatePosition: { xCm: 100, yCm: 100 },
+      preferredOrientationDegrees: 0,
+    },
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: "compat-A",
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "item-B" }],
+      fallbackModes: [],
+    },
+  });
+
+  const itemB = makeItem({
+    id: "item-B",
+    placement: {
+      preferredZone: "compat-B",
+      anchorWallId: null,
+      approximatePosition: { xCm: 200, yCm: 200 },
+      preferredOrientationDegrees: 90,
+    },
+    semanticPlacement: {
+      role: "COFFEE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: "compat-B",
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "item-A" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Cycle test",
+    items: [itemA, itemB],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  assert.deepEqual(resolved.items[0].placement, itemA.placement);
+  assert.deepEqual(resolved.items[1].placement, itemB.placement);
+});
+
+test("REL-R. self-reference terminates safely", () => {
+  const item = makeItem({
+    id: "self-ref",
+    placement: {
+      preferredZone: "self",
+      anchorWallId: null,
+      approximatePosition: { xCm: 150, yCm: 150 },
+      preferredOrientationDegrees: 0,
+    },
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: "self",
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "self-ref" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Self ref test",
+    items: [item],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  assert.deepEqual(resolved.items[0].placement, item.placement);
+});
+
+test("REL-S. repeated resolution of identical plan: deep-equal output", () => {
+  const sofa = makeItem({
+    id: "sofa-1",
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const table = makeItem({
+    id: "table-1",
+    sizeRange: {
+      widthMinCm: 100,
+      widthMaxCm: 120,
+      depthMinCm: 50,
+      depthMaxCm: 70,
+      heightMinCm: 40,
+      heightMaxCm: 50,
+    },
+    semanticPlacement: {
+      role: "COFFEE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "sofa-1" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Deterministic test",
+    items: [sofa, table],
+    notes: [],
+  };
+
+  const first = resolveSemanticPlan(plan, geometry, []);
+  const second = resolveSemanticPlan(plan, geometry, []);
+  assert.deepEqual(first, second);
+});
+
+test("REL-T. plan.items output order remains exactly input order", () => {
+  const item1 = makeItem({ id: "item-1" });
+  const item2 = makeItem({ id: "item-2" });
+  const item3 = makeItem({ id: "item-3" });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "Order test",
+    items: [item3, item1, item2],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, geometry, []);
+  assert.deepEqual(
+    resolved.items.map((i) => i.id),
+    ["item-3", "item-1", "item-2"],
+  );
+});
+
+test("REL-U. non-rectangle authoritative geometry: relational result remains inside/on polygon", () => {
+  const lShapeGeometry = createLShapeGeometry(600, 500, 260);
+
+  const sofa = makeItem({
+    id: "sofa-1",
+    semanticPlacement: {
+      role: "PRIMARY_SEATING",
+      mode: "AGAINST_WALL",
+      alignment: "CENTERED",
+      zoneId: null,
+      targetWallId: "wall-1",
+      relationships: [],
+      fallbackModes: [],
+    },
+  });
+
+  const table = makeItem({
+    id: "table-1",
+    sizeRange: {
+      widthMinCm: 100,
+      widthMaxCm: 120,
+      depthMinCm: 50,
+      depthMaxCm: 70,
+      heightMinCm: 40,
+      heightMaxCm: 50,
+    },
+    semanticPlacement: {
+      role: "COFFEE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: null,
+      targetWallId: null,
+      relationships: [{ type: "IN_FRONT_OF", targetItemId: "sofa-1" }],
+      fallbackModes: [],
+    },
+  });
+
+  const plan = {
+    schemaVersion: "1.1" as const,
+    roomIntent: "LShape relational test",
+    items: [sofa, table],
+    notes: [],
+  };
+
+  const resolved = resolveSemanticPlan(plan, lShapeGeometry, []);
+  const resolvedTable = resolved.items.find((i) => i.id === "table-1")!;
+
+  assert.deepEqual(resolvedTable.placement.approximatePosition, { xCm: 186, yCm: 160 });
+  assert.ok(resolvedTable.placement.approximatePosition);
+  assert.equal(isPointInsideOrOnPolygon(resolvedTable.placement.approximatePosition, lShapeGeometry.vertices), true);
+});
+
+type Relationships = FurniturePlanItemV11["semanticPlacement"]["relationships"];
+
+function makeFloatingItem(
+  id: string,
+  relationships: Relationships = [],
+  overrides: Partial<FurniturePlanItemV11> = {},
+): FurniturePlanItemV11 {
+  return makeItem({
+    id,
+    placement: {
+      preferredZone: "compatibility",
+      anchorWallId: null,
+      approximatePosition: { xCm: 333, yCm: 277 },
+      preferredOrientationDegrees: 37,
+    },
+    semanticPlacement: {
+      role: "SIDE_TABLE",
+      mode: "FLOATING",
+      alignment: null,
+      zoneId: "semantic",
+      targetWallId: null,
+      relationships,
+      fallbackModes: [],
+    },
+    sizeRange: {
+      widthMinCm: 50, widthMaxCm: 50,
+      depthMinCm: 50, depthMaxCm: 50,
+      heightMinCm: 50, heightMaxCm: 50,
+    },
+    ...overrides,
+  });
+}
+
+function makeRelationshipPlan(items: FurniturePlanItemV11[]) {
+  return { schemaVersion: "1.1" as const, roomIntent: "Relationship hardening", items, notes: [] };
+}
+
+for (const type of ["IN_FRONT_OF", "ADJACENT_TO"] as const) {
+  for (const failure of ["missing", "invalid", "coincident"] as const) {
+    test(`atomic ${type} + ${failure} FACES preserves exact compatibility placement`, () => {
+      const source = makeFloatingItem("source", [
+        { type, targetItemId: "sofa-1" },
+        { type: "FACES", targetItemId: "faces-target" },
+      ]);
+      const facesTarget = makeFloatingItem("faces-target", [], {
+        placement: {
+          preferredZone: null, anchorWallId: null,
+          approximatePosition: failure === "invalid" ? null : type === "IN_FRONT_OF"
+            ? { xCm: 250, yCm: 155 } : { xCm: 105, yCm: 45 },
+          preferredOrientationDegrees: null,
+        },
+      });
+      const items = [source, makeItem(), ...(failure === "missing" ? [] : [facesTarget])];
+      const plan = makeRelationshipPlan(items);
+      const snapshot = structuredClone(plan);
+      const resolved = resolveSemanticPlan(plan, geometry, []);
+      assert.deepEqual(resolved.items[0].placement, source.placement);
+      assert.strictEqual(resolved.items[0].placement, source.placement);
+      assert.deepEqual(plan, snapshot);
+      const anchors = new Map(items.slice(1).map((item) => [item.id, item]));
+      anchors.set("sofa-1", resolveSemanticPlacement(makeItem(), geometry, []));
+      assert.deepEqual(resolveSemanticPlacement(source, geometry, [], anchors).placement, source.placement);
+    });
+  }
+  test(`successful ${type} + FACES resolves position and directed orientation atomically`, () => {
+    const source = makeFloatingItem("source", [
+      { type, targetItemId: "sofa-1" },
+      { type: "FACES", targetItemId: "sofa-1" },
+    ]);
+    const resolved = resolveSemanticPlan(makeRelationshipPlan([source, makeItem()]), geometry);
+    assert.deepEqual(resolved.items[0].placement.approximatePosition,
+      type === "IN_FRONT_OF" ? { xCm: 250, yCm: 155 } : { xCm: 105, yCm: 45 });
+    assert.equal(resolved.items[0].placement.preferredOrientationDegrees, type === "IN_FRONT_OF" ? 180 : 270);
+  });
+}
+
+for (const unsupported of ["FLANKS", "GROUPED_WITH", "ANCHORS"] as const) {
+  test(`supported relationship mixed with ${unsupported} preserves full fallback`, () => {
+    const source = makeFloatingItem("source", [
+      { type: "ADJACENT_TO", targetItemId: "sofa-1" },
+      { type: unsupported, targetItemId: "sofa-1" },
+    ]);
+    const result = resolveSemanticPlan(makeRelationshipPlan([source, makeItem()]), geometry);
+    assert.strictEqual(result.items[0].placement, source.placement);
+  });
+}
+
+for (const type of ["IN_FRONT_OF", "ADJACENT_TO", "FACES"] as const) {
+  test(`conflicting ${type} targets preserve full fallback in either declaration order`, () => {
+    const relationships: Relationships = [
+      { type, targetItemId: "sofa-1" }, { type, targetItemId: "other" },
+    ];
+    for (const declarations of [relationships, [...relationships].reverse()]) {
+      const source = makeFloatingItem("source", declarations);
+      const result = resolveSemanticPlan(makeRelationshipPlan([source, makeItem(), makeItem({ id: "other" })]), geometry);
+      assert.strictEqual(result.items[0].placement, source.placement);
+    }
+  });
+  test(`exact duplicate ${type} declarations equal a single declaration`, () => {
+    const relationship = { type, targetItemId: "sofa-1" };
+    const single = makeFloatingItem("source", [relationship]);
+    const duplicate = makeFloatingItem("source", [relationship, { ...relationship }]);
+    const resolve = (source: FurniturePlanItemV11) => resolveSemanticPlan(makeRelationshipPlan([source, makeItem()]), geometry).items[0].placement;
+    assert.deepEqual(resolve(duplicate), resolve(single));
+    assert.notDeepEqual(resolve(single), single.placement);
+  });
+}
+
+test("IN_FRONT_OF takes precedence over ADJACENT_TO independent of declaration order", () => {
+  const relationships: Relationships = [
+    { type: "ADJACENT_TO", targetItemId: "unused-target" },
+    { type: "IN_FRONT_OF", targetItemId: "sofa-1" },
+  ];
+  for (const declarations of [relationships, [...relationships].reverse()]) {
+    const source = makeFloatingItem("source", declarations);
+    const result = resolveSemanticPlan(makeRelationshipPlan([source, makeItem(), makeFloatingItem("unused-target")]), geometry);
+    assert.deepEqual(result.items[0].placement.approximatePosition, { xCm: 250, yCm: 155 });
+  }
+});
+
+test("duplicate plan IDs preserve the complete original plan, placements, and order", () => {
+  const first = makeItem();
+  const second = makeFloatingItem(first.id);
+  const third = makeFloatingItem("dependent", [{ type: "ADJACENT_TO", targetItemId: first.id }]);
+  const plan = makeRelationshipPlan([first, third, second]);
+  const snapshot = structuredClone(plan);
+  const result = resolveSemanticPlan(plan, geometry);
+  assert.deepEqual(result, snapshot);
+  assert.equal(result.items.length, 3);
+  result.items.forEach((item, index) => assert.strictEqual(item.placement, plan.items[index].placement));
+  assert.deepEqual(plan, snapshot);
+});
+
+for (const degrees of [359.6, -0.4, 0, 45, 90, 180, 270]) {
+  test(`FACES canonicalizes directed angle ${degrees} after rounding`, () => {
+    const radians = degrees * Math.PI / 180;
+    const angle = computeFacesOrientation({ xCm: 0, yCm: 0 }, { xCm: -Math.sin(radians), yCm: Math.cos(radians) });
+    assert.equal(angle, ((Math.round(degrees) % 360) + 360) % 360);
+    assert.ok(angle !== null && angle >= 0 && angle < 360);
+  });
+}
+
+test("unresolved relational targets cannot anchor downstream relationships in either input order", () => {
+  const unresolved = makeFloatingItem("unresolved", [{ type: "FACES", targetItemId: "missing" }]);
+  const dependent = makeFloatingItem("dependent", [{ type: "ADJACENT_TO", targetItemId: unresolved.id }]);
+  for (const items of [[unresolved, dependent], [dependent, unresolved]]) {
+    const result = resolveSemanticPlan(makeRelationshipPlan(items), geometry);
+    result.items.forEach((item, index) => assert.strictEqual(item.placement, items[index].placement));
+  }
+});
+
+test("valid three-level chain is immutable and identical by ID across all six permutations", () => {
+  const sofa = makeItem();
+  const table = makeFloatingItem("table", [{ type: "IN_FRONT_OF", targetItemId: sofa.id }]);
+  const side = makeFloatingItem("side", [{ type: "ADJACENT_TO", targetItemId: table.id }]);
+  const permutations = [
+    [sofa, table, side], [sofa, side, table], [table, sofa, side],
+    [table, side, sofa], [side, sofa, table], [side, table, sofa],
+  ];
+  const expected = new Map([
+    [sofa.id, { xCm: 250, yCm: 45 }], [table.id, { xCm: 250, yCm: 155 }], [side.id, { xCm: 190, yCm: 155 }],
+  ]);
+  const baseline = resolveSemanticPlan(makeRelationshipPlan(permutations[0]), geometry);
+  for (const items of permutations) {
+    const plan = makeRelationshipPlan(items);
+    const snapshot = structuredClone(plan);
+    const result = resolveSemanticPlan(plan, geometry);
+    assert.deepEqual(result.items.map((item) => item.id), items.map((item) => item.id));
+    for (const item of result.items) {
+      assert.deepEqual(item.placement.approximatePosition, expected.get(item.id));
+      assert.deepEqual(item, baseline.items.find((candidate) => candidate.id === item.id));
+    }
+    assert.deepEqual(plan, snapshot);
+  }
+});
+
+test("ADJACENT_TO uses the effective wall-constrained width rather than original midpoint", () => {
+  const door: RoomOpening = {
+    openingType: "door", wallSegmentId: "wall-1", offsetCm: 235, widthCm: 265,
+    heightCm: 210, sillHeightCm: null, hingeSide: "left", swingDirection: "inward",
+  };
+  const sofa = makeItem({ semanticPlacement: { ...makeItem().semanticPlacement, alignment: "LEFT_ALIGNED" } });
+  const side = makeFloatingItem("side", [{ type: "ADJACENT_TO", targetItemId: sofa.id }]);
+  const result = resolveSemanticPlan(makeRelationshipPlan([side, sofa]), geometry, [door]);
+  assert.deepEqual(result.items[1].placement.approximatePosition, { xCm: 115, yCm: 45 });
+  assert.deepEqual(result.items[0].placement.approximatePosition, { xCm: 255, yCm: 45 });
+  assert.equal(255 - 115, 210 / 2 + ADJACENT_GAP_CM + 50 / 2);
+  assert.deepEqual(result.items[1].sizeRange, sofa.sizeRange);
+});
+
+test("independent compatibility anchors remain eligible for positional relationships", () => {
+  const anchor = makeFloatingItem("compatibility-anchor", [], {
+    placement: {
+      preferredZone: null, anchorWallId: "wall-1",
+      approximatePosition: { xCm: 250, yCm: 45 }, preferredOrientationDegrees: 0,
+    },
+  });
+  const dependent = makeFloatingItem("dependent", [{ type: "IN_FRONT_OF", targetItemId: anchor.id }]);
+  const result = resolveSemanticPlan(makeRelationshipPlan([dependent, anchor]), geometry);
+  assert.strictEqual(result.items[1].placement, anchor.placement);
+  assert.deepEqual(result.items[0].placement.approximatePosition, { xCm: 250, yCm: 135 });
+});
+
+test("failed wall semantic resolution is not an eligible compatibility anchor", () => {
+  const anchor = makeItem({
+    placement: {
+      preferredZone: "compatibility", anchorWallId: "wall-1",
+      approximatePosition: { xCm: 250, yCm: 45 }, preferredOrientationDegrees: 0,
+    },
+    semanticPlacement: { ...makeItem().semanticPlacement, targetWallId: "missing-wall" },
+  });
+  const dependent = makeFloatingItem("dependent", [{ type: "IN_FRONT_OF", targetItemId: anchor.id }]);
+  const result = resolveSemanticPlan(makeRelationshipPlan([dependent, anchor]), geometry);
+  assert.strictEqual(result.items[0].placement, dependent.placement);
+  assert.strictEqual(result.items[1].placement, anchor.placement);
+});
+
+test("unsupported-only targets cannot anchor supported dependents", () => {
+  const anchor = makeFloatingItem("unsupported", [{ type: "ANCHORS", targetItemId: "sofa-1" }]);
+  const dependent = makeFloatingItem("dependent", [{ type: "ADJACENT_TO", targetItemId: anchor.id }]);
+  const result = resolveSemanticPlan(makeRelationshipPlan([dependent, anchor, makeItem()]), geometry);
+  assert.strictEqual(result.items[0].placement, dependent.placement);
+  assert.strictEqual(result.items[1].placement, anchor.placement);
+});
+
+test("shadowed ADJACENT_TO does not create a dependency after IN_FRONT_OF precedence", () => {
+  const source = makeFloatingItem("source", [
+    { type: "IN_FRONT_OF", targetItemId: "sofa-1" },
+    { type: "ADJACENT_TO", targetItemId: "missing-shadowed-target" },
+  ]);
+  const result = resolveSemanticPlan(makeRelationshipPlan([source, makeItem()]), geometry);
+  assert.deepEqual(result.items[0].placement.approximatePosition, { xCm: 250, yCm: 155 });
+});
+
+test("nonfinite planning dimensions preserve compatibility placement", () => {
+  const source = makeFloatingItem("source", [{ type: "ADJACENT_TO", targetItemId: "sofa-1" }]);
+  const anchor = makeItem({ sizeRange: { ...makeItem().sizeRange, depthMaxCm: Infinity } });
+  const result = resolveSemanticPlacement(source, geometry, [], new Map([[anchor.id, anchor]]));
+  assert.strictEqual(result.placement, source.placement);
 });

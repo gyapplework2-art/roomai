@@ -128,6 +128,40 @@ const mockV11GeneratedPlan: FurniturePlanV11 = {
       functionalRequirements: ["surface for drinks"],
       reasoning: "Floating in front of the sofa.",
     },
+    {
+      id: "armchair-1",
+      category: "armchair",
+      subtype: null,
+      priority: "optional",
+      placement: {
+        preferredZone: "side_seating",
+        anchorWallId: null,
+        approximatePosition: { xCm: 150, yCm: 250 },
+        preferredOrientationDegrees: 0,
+      },
+      semanticPlacement: {
+        role: "SECONDARY_SEATING",
+        mode: "FLOATING",
+        alignment: null,
+        zoneId: "side_seating",
+        targetWallId: null,
+        relationships: [],
+        fallbackModes: [],
+      },
+      sizeRange: {
+        widthMinCm: 80,
+        widthMaxCm: 100,
+        depthMinCm: 80,
+        depthMaxCm: 100,
+        heightMinCm: 75,
+        heightMaxCm: 90,
+      },
+      styleHints: ["modern"],
+      materialHints: ["fabric"],
+      colorHints: ["gray"],
+      functionalRequirements: ["extra seat"],
+      reasoning: "Floating armchair without relationships.",
+    },
   ],
   notes: ["Ensure door swing remains clear."],
 };
@@ -210,7 +244,7 @@ test("F. resolver-derived placement reaches downstream room constraint processin
   const marketNormalized = normalizeFurniturePlanForMarket(resolved, "north_america");
   const constrained = constrainFurniturePlanToRoom(marketNormalized, mockGeometry, mockOpenings);
 
-  assert.equal(constrained.items.length, 2);
+  assert.equal(constrained.items.length, 3);
   const constrainedSofa = constrained.items.find((i) => i.item.id === "sofa-1");
   assert.ok(constrainedSofa);
   assert.equal(constrainedSofa.roomStatus, "ready");
@@ -225,20 +259,20 @@ test("G. unsupported FLOATING semantic placement retains compatibility placement
   const normalizedSemantic = normalizeSemanticPlan(mockV11GeneratedPlan);
   const resolved = resolveSemanticPlan(normalizedSemantic, mockGeometry, mockOpenings);
 
-  const resolvedTable = resolved.items.find((i) => i.id === "coffee-table-1");
-  assert.ok(resolvedTable);
-  assert.equal(resolvedTable.placement.anchorWallId, null);
+  const resolvedArmchair = resolved.items.find((i) => i.id === "armchair-1");
+  assert.ok(resolvedArmchair);
+  assert.equal(resolvedArmchair.placement.anchorWallId, null);
   // approximatePosition is preserved from compatibility placement
-  assert.deepEqual(resolvedTable.placement.approximatePosition, { xCm: 250, yCm: 170 });
-  assert.equal(resolvedTable.placement.preferredOrientationDegrees, 0);
+  assert.deepEqual(resolvedArmchair.placement.approximatePosition, { xCm: 150, yCm: 250 });
+  assert.equal(resolvedArmchair.placement.preferredOrientationDegrees, 0);
 
   // Downstream room constraints accepts it as freestanding
   const marketNormalized = normalizeFurniturePlanForMarket(resolved, "north_america");
   const constrained = constrainFurniturePlanToRoom(marketNormalized, mockGeometry, mockOpenings);
-  const constrainedTable = constrained.items.find((i) => i.item.id === "coffee-table-1");
-  assert.ok(constrainedTable);
-  assert.equal(constrainedTable.roomStatus, "ready");
-  assert.equal(constrainedTable.roomConstraint?.selectedWallId, null);
+  const constrainedArmchair = constrained.items.find((i) => i.item.id === "armchair-1");
+  assert.ok(constrainedArmchair);
+  assert.equal(constrainedArmchair.roomStatus, "ready");
+  assert.equal(constrainedArmchair.roomConstraint?.selectedWallId, null);
 });
 
 test("H. existing v1.0 compatibility remains available outside the new generation path", () => {
@@ -303,7 +337,7 @@ test("finalizeGeneratedFurniturePlan: performs semantic normalization and resolu
   const finalized = finalizeGeneratedFurniturePlan(mockV11GeneratedPlan, mockGeometry, mockOpenings);
 
   assert.equal(finalized.schemaVersion, "1.1");
-  assert.equal(finalized.items.length, 2);
+  assert.equal(finalized.items.length, 3);
 
   // AGAINST_WALL + CENTERED resolution overrides AI compatibility position (requirement C)
   const sofa = finalized.items.find((i) => i.id === "sofa-1");
@@ -314,12 +348,20 @@ test("finalizeGeneratedFurniturePlan: performs semantic normalization and resolu
   assert.equal(sofa.placement.approximatePosition?.yCm, 46.25);
   assert.equal(sofa.placement.preferredOrientationDegrees, 0);
 
-  // FLOATING unsupported semantic placement retains its compatibility position (requirement D)
+  // IN_FRONT_OF resolution positions coffee table in front of sofa
   const table = finalized.items.find((i) => i.id === "coffee-table-1");
   assert.ok(table);
   assert.equal(table.placement.anchorWallId, null);
-  assert.deepEqual(table.placement.approximatePosition, mockV11GeneratedPlan.items[1].placement.approximatePosition);
+  assert.equal(table.placement.approximatePosition?.xCm, 302.5);
+  assert.equal(table.placement.approximatePosition?.yCm, 162.5);
   assert.equal(table.placement.preferredOrientationDegrees, 0);
+
+  // FLOATING unsupported semantic placement retains its compatibility position (requirement D)
+  const armchair = finalized.items.find((i) => i.id === "armchair-1");
+  assert.ok(armchair);
+  assert.equal(armchair.placement.anchorWallId, null);
+  assert.deepEqual(armchair.placement.approximatePosition, mockV11GeneratedPlan.items[2].placement.approximatePosition);
+  assert.equal(armchair.placement.preferredOrientationDegrees, 0);
 });
 
 test("finalizeGeneratedFurniturePlan: accepts actual non-rectangle RoomGeometry without reconstruction or casting", () => {
