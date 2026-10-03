@@ -10,6 +10,7 @@ import { createFurnitureFootprint } from "./footprints";
 import { resolveLivingRoomComposition } from "./role-plan";
 import { validateSpatialPlan } from "./spatial-validator";
 import type { FurniturePlanItem, FurniturePlan, FurniturePlanItemV11 } from "./types";
+import { doorApproachClearanceRule, seatingCoffeeTableClearanceRule } from "./clearance-rules";
 
 const room = createRectangleGeometry(500, 400, 250);
 
@@ -34,7 +35,7 @@ test("a valid whole-room arrangement is unchanged and has no violations", () => 
   const source = plan([item("a", 100, 100), item("b", 300, 200, 80, 40, 30)]);
   const snapshot = structuredClone(source);
   const geometrySnapshot = structuredClone(room);
-  assert.deepEqual(validateSpatialPlan(source, room), { valid: true, violations: [] });
+  assert.deepEqual(validateSpatialPlan(source, room), { valid: true, physicallyValid: true, functionallyValid: true, violations: [] });
   assert.deepEqual(source, snapshot);
   assert.deepEqual(room, geometrySnapshot);
 });
@@ -153,8 +154,12 @@ test("touching the wall outside the door span is allowed", () => {
   assert.deepEqual(types([item("clear", 50, 20, 40, 40)], room, [door]), []);
 });
 
-test("nearby furniture not touching the opening creates no approach or swing clearance conflict", () => {
-  assert.deepEqual(types([item("nearby", 150, 40, 60, 40)], room, [door]), []);
+test("nearby furniture has no physical door conflict but occupies the A.3.2 approach region", () => {
+  const result = validateSpatialPlan(plan([item("nearby", 150, 40, 60, 40)]), room, [door]);
+  assert.deepEqual(result.violations.map((violation) => violation.type), ["INSUFFICIENT_FUNCTIONAL_CLEARANCE"]);
+  assert.equal(result.violations[0].priority, "P1");
+  assert.equal(result.physicallyValid, true);
+  assert.equal(result.functionallyValid, false);
 });
 
 test("ordinary windows are not floor obstacles", () => {
@@ -247,7 +252,7 @@ test("explicit AREA_RUG role controls floor layering rather than broad category 
     semanticPlacement: { role: "AREA_RUG", mode: "FLOATING", alignment: null, zoneId: null, targetWallId: null, relationships: [], fallbackModes: [] },
   };
   const furniture: FurniturePlanItemV11 = { ...rug, id: "seating", category: "rug", semanticPlacement: { ...rug.semanticPlacement, role: "PRIMARY_SEATING" } };
-  assert.deepEqual(validateSpatialPlan({ schemaVersion: "1.1", roomIntent: "Layering", items: [rug, furniture], notes: [] }, room), { valid: true, violations: [] });
+  assert.deepEqual(validateSpatialPlan({ schemaVersion: "1.1", roomIntent: "Layering", items: [rug, furniture], notes: [] }, room), { valid: true, physicallyValid: true, functionallyValid: true, violations: [] });
 });
 
 test("invalid authoritative geometry and malformed doors are rejected as validation preconditions", () => {
@@ -284,3 +289,246 @@ for (const { name, geometry, center, diagonal } of [
     assert.deepEqual(types([source], geometry), ["OUTSIDE_ROOM"]);
   });
 }
+
+function semanticItem(
+  source: FurniturePlanItem,
+  role: FurniturePlanItemV11["semanticPlacement"]["role"],
+  relationships: FurniturePlanItemV11["semanticPlacement"]["relationships"] = [],
+): FurniturePlanItemV11 {
+  return { ...source, semanticPlacement: {
+    role, mode: "FLOATING", alignment: null, zoneId: null, targetWallId: null, relationships, fallbackModes: [],
+  } };
+}
+
+function relatedTableItems(gap: number): FurniturePlanItemV11[] {
+  return [
+    semanticItem(item("seating", 200, 100, 100, 100), "PRIMARY_SEATING"),
+    semanticItem(item("table", 200, 170 + gap, 100, 40), "COFFEE_TABLE", [{ type: "IN_FRONT_OF", targetItemId: "seating" }]),
+  ];
+}
+
+function functionalPlan(items: FurniturePlanItemV11[]) {
+  return { schemaVersion: "1.1" as const, roomIntent: "Functional validation", items, notes: [] };
+}
+
+test("initial clearance defaults are explicit hard P1 planning rules, not regulatory claims", () => {
+  assert.equal(seatingCoffeeTableClearanceRule.minimumCm, 35);
+  assert.deepEqual(seatingCoffeeTableClearanceRule.preferredRangeCm, [35, 50]);
+  assert.equal(doorApproachClearanceRule.minimumCm, 75);
+  for (const rule of [seatingCoffeeTableClearanceRule, doorApproachClearanceRule]) {
+    assert.equal(rule.priority, "P1");
+    assert.equal(rule.classification, "hard");
+    assert.equal(rule.regulatoryGuarantee, false);
+  }
+});
+
+for (const gap of [40, 35, 100]) {
+  test(`explicit seating/coffee-table boundary gap ${gap} cm passes minimum-only validation`, () => {
+    assert.deepEqual(validateSpatialPlan(functionalPlan(relatedTableItems(gap)), room), {
+      valid: true, physicallyValid: true, functionallyValid: true, violations: [],
+    });
+  });
+}
+
+test("34.9 cm related coffee-table gap creates a structured P1-only violation", () => {
+  const result = validateSpatialPlan(functionalPlan(relatedTableItems(34.9)), room);
+  assert.equal(result.valid, false);
+  assert.equal(result.physicallyValid, true);
+  assert.equal(result.functionallyValid, false);
+  assert.equal(result.violations.length, 1);
+  const violation = result.violations[0];
+  assert.equal(violation.type, "INSUFFICIENT_FUNCTIONAL_CLEARANCE");
+  assert.equal(violation.priority, "P1");
+  assert.equal(violation.classification, "hard");
+  assert.deepEqual(violation.itemIds, ["seating", "table"]);
+  if (violation.type === "INSUFFICIENT_FUNCTIONAL_CLEARANCE") {
+    assert.equal(violation.details.context, "SEATING_COFFEE_TABLE");
+    assert.equal(violation.details.ruleId, seatingCoffeeTableClearanceRule.id);
+    assert.equal(violation.details.requiredMinimumCm, 35);
+    assert.ok(Math.abs(violation.details.measuredClearanceCm - 34.9) < 1e-12);
+    if (violation.details.context === "SEATING_COFFEE_TABLE") assert.deepEqual(violation.details.relationship, {
+      type: "IN_FRONT_OF", sourceItemId: "table", targetItemId: "seating",
+    });
+  }
+});
+
+test("physical seating/table overlap suppresses only the same pair's redundant P1", () => {
+  const result = validateSpatialPlan(functionalPlan(relatedTableItems(-10)), room);
+  assert.deepEqual(result.violations.map((violation) => [violation.type, violation.priority]), [["FURNITURE_OVERLAP", "P0"]]);
+  assert.equal(result.physicallyValid, false);
+  assert.equal(result.functionallyValid, true);
+  assert.equal(result.valid, false);
+});
+
+test("edge touching is physically valid but fails explicit coffee-table functional spacing", () => {
+  const result = validateSpatialPlan(functionalPlan(relatedTableItems(0)), room);
+  assert.equal(result.physicallyValid, true);
+  assert.deepEqual(result.violations.map((violation) => violation.type), ["INSUFFICIENT_FUNCTIONAL_CLEARANCE"]);
+  const violation = result.violations[0];
+  if (violation.type === "INSUFFICIENT_FUNCTIONAL_CLEARANCE") assert.equal(violation.details.measuredClearanceCm, 0);
+});
+
+for (const relationship of [null, "FACES", "ADJACENT_TO"] as const) {
+  test(`${relationship ?? "unrelated"} coffee-table placement is not an implicit minimum-gap rule`, () => {
+    const items = relatedTableItems(10);
+    items[1] = { ...items[1], semanticPlacement: { ...items[1].semanticPlacement, relationships: relationship ? [{ type: relationship, targetItemId: "seating" }] : [] } };
+    assert.equal(validateSpatialPlan(functionalPlan(items), room).valid, true);
+  });
+}
+
+test("only explicitly associated seating is checked, not every nearby chair", () => {
+  const items = relatedTableItems(40);
+  items.push(semanticItem(item("unrelated-chair", 100, 200, 50, 40), "SECONDARY_SEATING"));
+  assert.equal(validateSpatialPlan(functionalPlan(items), room).valid, true);
+});
+
+test("rotated related footprints use true boundary distance and preserve stable semantic IDs", () => {
+  const seating = semanticItem(item("stable-seat", 200, 200, 100, 40, 45), "SECONDARY_SEATING");
+  const table = semanticItem(item("stable-table", 200 - 74.9 * Math.SQRT1_2, 200 + 74.9 * Math.SQRT1_2, 100, 40, 45), "COFFEE_TABLE", [{ type: "IN_FRONT_OF", targetItemId: seating.id }]);
+  const result = validateSpatialPlan(functionalPlan([table, seating]), room);
+  assert.equal(result.physicallyValid, true);
+  assert.equal(result.violations.length, 1);
+  const violation = result.violations[0];
+  assert.deepEqual(violation.itemIds, [seating.id, table.id]);
+  assert.equal(violation.type, "INSUFFICIENT_FUNCTIONAL_CLEARANCE");
+  if (violation.type === "INSUFFICIENT_FUNCTIONAL_CLEARANCE") assert.ok(Math.abs(violation.details.measuredClearanceCm - 34.9) < 1e-12);
+});
+
+test("duplicate relationship declarations do not duplicate functional diagnostics", () => {
+  const items = relatedTableItems(10);
+  items[1].semanticPlacement.relationships.push({ type: "IN_FRONT_OF", targetItemId: "seating" });
+  assert.equal(validateSpatialPlan(functionalPlan(items), room).violations.length, 1);
+});
+
+test("missing/invalid relationship targets are skipped without fabricating geometry", () => {
+  const items = relatedTableItems(10);
+  const seating = { ...items[0], placement: { ...items[0].placement, approximatePosition: null } };
+  const result = validateSpatialPlan(functionalPlan([seating, items[1]]), room);
+  assert.deepEqual(result.violations.map((violation) => violation.type), ["INVALID_FOOTPRINT"]);
+  assert.equal(validateSpatialPlan(functionalPlan([items[1]]), room).violations.length, 0);
+});
+
+test("floor rugs receive neither furniture relationship-clearance nor door-approach violations", () => {
+  const items = relatedTableItems(10);
+  items[0] = { ...items[0], semanticPlacement: { ...items[0].semanticPlacement, role: "AREA_RUG" } };
+  assert.equal(validateSpatialPlan(functionalPlan(items), room).valid, true);
+  const rug = semanticItem(item("rug", 150, 50, 40, 20), "AREA_RUG");
+  assert.equal(validateSpatialPlan(functionalPlan([rug]), room, [door]).valid, true);
+});
+
+for (const { centerY, expected } of [{ centerY: 50, expected: false }, { centerY: 85, expected: true }, { centerY: 85.1, expected: true }]) {
+  test(`horizontal door approach with nearest footprint depth ${centerY - 10} cm`, () => {
+    const result = validateSpatialPlan(plan([item("obstacle", 150, centerY, 40, 20)]), room, [door]);
+    assert.equal(result.physicallyValid, true);
+    assert.equal(result.valid, expected);
+    assert.equal(result.functionallyValid, expected);
+    assert.deepEqual(result.violations.map((violation) => violation.type), expected ? [] : ["INSUFFICIENT_FUNCTIONAL_CLEARANCE"]);
+    const violation = result.violations[0];
+    if (violation?.type === "INSUFFICIENT_FUNCTIONAL_CLEARANCE") {
+      assert.equal(violation.details.ruleId, doorApproachClearanceRule.id);
+      assert.equal(violation.details.requiredMinimumCm, 75);
+      assert.equal(violation.details.measuredClearanceCm, 40);
+      if (violation.details.context === "DOOR_APPROACH") assert.deepEqual(violation.details.approachPolygon, [
+        { xCm: 100, yCm: 0 }, { xCm: 200, yCm: 0 }, { xCm: 200, yCm: 75 }, { xCm: 100, yCm: 75 },
+      ]);
+    }
+  });
+}
+
+test("door approach has physical opening width without lateral padding", () => {
+  assert.equal(validateSpatialPlan(plan([item("beside", 70, 50, 40, 20)]), room, [door]).valid, true);
+});
+
+test("vertical door approach works and boundary-only contact is allowed", () => {
+  const opening = { ...door, wallSegmentId: "wall-2" };
+  const blocked = validateSpatialPlan(plan([item("vertical", 480, 150, 20, 20)]), room, [opening]);
+  assert.equal(blocked.physicallyValid, true);
+  assert.deepEqual(blocked.violations.map((violation) => violation.type), ["INSUFFICIENT_FUNCTIONAL_CLEARANCE"]);
+  assert.equal(validateSpatialPlan(plan([item("clear", 415, 150, 20, 20)]), room, [opening]).valid, true);
+});
+
+test("rotated authoritative wall and door construct the approach inward without assuming winding", () => {
+  const diagonal = Math.SQRT1_2;
+  const geometry: RoomGeometry = { ...room, vertices: room.vertices.map((vertex) => ({
+    ...vertex, xCm: 300 + (vertex.xCm - vertex.yCm) * diagonal, yCm: 300 + (vertex.xCm + vertex.yCm) * diagonal,
+  })) };
+  const obstacle = item("rotated", 300 + (150 - 50) * diagonal, 300 + (150 + 50) * diagonal, 40, 20, 45);
+  const result = validateSpatialPlan(plan([obstacle]), geometry, [door]);
+  assert.equal(result.physicallyValid, true);
+  assert.deepEqual(result.violations.map((violation) => violation.type), ["INSUFFICIENT_FUNCTIONAL_CLEARANCE"]);
+  const violation = result.violations[0];
+  if (violation.type === "INSUFFICIENT_FUNCTIONAL_CLEARANCE") assert.ok(Math.abs(violation.details.measuredClearanceCm - 40) < 1e-12);
+  assert.deepEqual(validateSpatialPlan(plan([obstacle]), { ...geometry, vertices: [...geometry.vertices].reverse() }, [door]), result);
+});
+
+test("physical door conflict remains P0 and suppresses the exact same door's redundant P1", () => {
+  const result = validateSpatialPlan(plan([item("blocker", 150, 20, 40, 40)]), room, [door]);
+  assert.deepEqual(result.violations.map((violation) => [violation.type, violation.priority]), [["DOOR_CONFLICT", "P0"]]);
+  assert.equal(result.physicallyValid, false);
+  assert.equal(result.valid, false);
+});
+
+test("window spans create neither physical doorway nor functional approach regions", () => {
+  const window: RoomOpening = { ...door, openingType: "window", hingeSide: null, swingDirection: null, sillHeightCm: 0 };
+  assert.equal(validateSpatialPlan(plan([item("near-window", 150, 50, 40, 20)]), room, [window]).valid, true);
+});
+
+test("no generic use-side or wall clearance is inferred from AGAINST_WALL", () => {
+  const furniture = semanticItem(item("wall-item", 50, 200, 100, 100), "PRIMARY_SEATING");
+  furniture.semanticPlacement.mode = "AGAINST_WALL";
+  furniture.semanticPlacement.targetWallId = "wall-4";
+  assert.equal(validateSpatialPlan(functionalPlan([furniture]), room).valid, true);
+});
+
+test("mixed P0/P1 violations retain stable IDs/order, exact inputs and validity summaries", () => {
+  const items = [...relatedTableItems(34.9), semanticItem(item("outside", 20, 300), "STORAGE")];
+  const source = functionalPlan(items);
+  const snapshot = structuredClone(source);
+  const result = validateSpatialPlan(source, room);
+  assert.deepEqual(result.violations.map((violation) => [violation.type, violation.priority]), [["INSUFFICIENT_FUNCTIONAL_CLEARANCE", "P1"], ["OUTSIDE_ROOM", "P0"]]);
+  assert.equal(result.valid, false);
+  assert.equal(result.physicallyValid, false);
+  assert.equal(result.functionallyValid, false);
+  assert.deepEqual(validateSpatialPlan(source, room), result);
+  assert.deepEqual(validateSpatialPlan({ ...source, items: [...source.items].reverse() }, room), result);
+  assert.deepEqual(result.violations.map((violation) => violation.id), result.violations.map((violation) => violation.id).sort());
+  assert.deepEqual(source, snapshot);
+});
+
+test("unrelated P0 overlap does not suppress a coffee-table clearance violation", () => {
+  const items = [...relatedTableItems(10), semanticItem(item("other-a", 400, 300, 40, 40), "STORAGE"), semanticItem(item("other-b", 400, 300, 40, 40), "STORAGE")];
+  const result = validateSpatialPlan(functionalPlan(items), room);
+  assert.deepEqual(result.violations.map((violation) => violation.type), ["FURNITURE_OVERLAP", "INSUFFICIENT_FUNCTIONAL_CLEARANCE"]);
+});
+
+test("door approach ordering and identities are stable across door and item permutations", () => {
+  const openings = [door, { ...door, id: "other-door", offsetCm: 300 }];
+  const items = [item("left", 150, 50, 40, 20), item("right", 350, 50, 40, 20)];
+  const snapshot = structuredClone([openings, items]);
+  const result = validateSpatialPlan(plan(items), room, openings);
+  assert.equal(result.violations.length, 2);
+  assert.equal(new Set(result.violations.map((violation) => violation.id)).size, 2);
+  assert.ok(result.violations.every((violation) => violation.priority === "P1"));
+  assert.deepEqual(validateSpatialPlan(plan([...items].reverse()), room, [...openings].reverse()), result);
+  assert.deepEqual([openings, items], snapshot);
+});
+
+test("A.2.3 chairs remain a P0 overlap and coffee-table semantic spacing is checked without repairs", () => {
+  const composition = resolveLivingRoomComposition({ geometry: room, mustHaveItems: ["sofa", "chair", "chair"] });
+  const snapshot = structuredClone(composition);
+  const result = validateSpatialPlan(composition.plan, room);
+  assert.deepEqual(result.violations.map((violation) => [violation.type, violation.itemIds]), [["FURNITURE_OVERLAP", ["chairs-1", "chairs-2"]]]);
+  assert.equal(result.functionallyValid, true);
+  const table = composition.plan.items.find((entry) => entry.semanticPlacement.role === "COFFEE_TABLE");
+  assert.ok(table?.placement.approximatePosition);
+  const modified = structuredClone(composition.plan);
+  const closer = modified.items.find((entry) => entry.id === table.id);
+  assert.ok(closer?.placement.approximatePosition);
+  closer.placement.approximatePosition.yCm -= 10;
+  const closerSnapshot = structuredClone(modified);
+  const failures = validateSpatialPlan(modified, room);
+  assert.equal(failures.violations.filter((violation) => violation.type === "INSUFFICIENT_FUNCTIONAL_CLEARANCE").length, 1);
+  assert.ok(failures.violations.every((violation) => !violation.itemIds.includes("area-rug-1")));
+  assert.deepEqual(composition, snapshot);
+  assert.deepEqual(modified, closerSnapshot);
+});

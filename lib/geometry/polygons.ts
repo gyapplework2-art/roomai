@@ -122,3 +122,72 @@ export function segmentInsidePolygon(start: Point, end: Point, polygon: readonly
 export function polygonInsidePolygon(inner: readonly Point[], outer: readonly Point[]): boolean {
   return inner.length >= 3 && inner.every((vertex, index) => segmentInsidePolygon(vertex, inner[(index + 1) % inner.length], outer));
 }
+
+function pointSegmentDistance(point: Point, start: Point, end: Point): number {
+  const deltaX = end.xCm - start.xCm;
+  const deltaY = end.yCm - start.yCm;
+  const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+  const fraction = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1,
+    ((point.xCm - start.xCm) * deltaX + (point.yCm - start.yCm) * deltaY) / lengthSquared));
+  return Math.hypot(point.xCm - (start.xCm + fraction * deltaX), point.yCm - (start.yCm + fraction * deltaY));
+}
+
+/** Actual Euclidean boundary distance; intersection/containment/touching is zero within GEOMETRY_EPSILON. */
+export function minimumPolygonDistance(first: readonly Point[], second: readonly Point[]): number {
+  if (first.length < 3 || second.length < 3) throw new Error("POLYGON_DISTANCE_INVALID");
+  if (isPointInsideOrOnPolygon(second[0], first)
+    || first.some((vertex, index) => segmentIntersectsPolygon(vertex, first[(index + 1) % first.length], second))) return 0;
+  let minimum = Infinity;
+  for (const [vertices, edges] of [[first, second], [second, first]]) {
+    for (const vertex of vertices) {
+      edges.forEach((start, index) => {
+        minimum = Math.min(minimum, pointSegmentDistance(vertex, start, edges[(index + 1) % edges.length]));
+      });
+    }
+  }
+  return minimum <= GEOMETRY_EPSILON ? 0 : minimum;
+}
+
+export function minimumSegmentPolygonDistance(start: Point, end: Point, polygon: readonly Point[]): number {
+  if (polygon.length < 3) throw new Error("POLYGON_DISTANCE_INVALID");
+  if (segmentIntersectsPolygon(start, end, polygon)) return 0;
+  let minimum = Infinity;
+  polygon.forEach((vertex, index) => {
+    const next = polygon[(index + 1) % polygon.length];
+    minimum = Math.min(minimum, pointSegmentDistance(start, vertex, next),
+      pointSegmentDistance(end, vertex, next), pointSegmentDistance(vertex, start, end));
+  });
+  return minimum <= GEOMETRY_EPSILON ? 0 : minimum;
+}
+
+export function findInwardNormal(
+  wallPoint: Point,
+  unitX: number,
+  unitY: number,
+  vertices: readonly Point[],
+): Point | null {
+  const normal1 = { xCm: -unitY, yCm: unitX };
+  const normal2 = { xCm: unitY, yCm: -unitX };
+  for (const delta of [0.5, 1.0, 0.1, 2.0]) {
+    const in1 = isPointInsideOrOnPolygon({ xCm: wallPoint.xCm + normal1.xCm * delta, yCm: wallPoint.yCm + normal1.yCm * delta }, vertices);
+    const in2 = isPointInsideOrOnPolygon({ xCm: wallPoint.xCm + normal2.xCm * delta, yCm: wallPoint.yCm + normal2.yCm * delta }, vertices);
+    if (in1 && !in2) return normal1;
+    if (in2 && !in1) return normal2;
+  }
+  let travel1 = 0;
+  let travel2 = 0;
+  for (let distance = 0.5; distance <= 200; distance += 0.5) {
+    if (!isPointInsideOrOnPolygon({ xCm: wallPoint.xCm + normal1.xCm * distance, yCm: wallPoint.yCm + normal1.yCm * distance }, vertices)) break;
+    travel1 = distance;
+  }
+  for (let distance = 0.5; distance <= 200; distance += 0.5) {
+    if (!isPointInsideOrOnPolygon({ xCm: wallPoint.xCm + normal2.xCm * distance, yCm: wallPoint.yCm + normal2.yCm * distance }, vertices)) break;
+    travel2 = distance;
+  }
+  if (travel1 <= 0 && travel2 <= 0) return null;
+  if (travel1 > travel2) return normal1;
+  if (travel2 > travel1) return normal2;
+  return normal1.xCm !== normal2.xCm
+    ? normal1.xCm > normal2.xCm ? normal1 : normal2
+    : normal1.yCm >= normal2.yCm ? normal1 : normal2;
+}

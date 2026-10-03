@@ -1,6 +1,7 @@
 import { getWallEndpoints, getWallLengthCm } from "@/lib/geometry/dimensions";
 import { isPointInsideOrOnPolygon } from "@/lib/geometry/point-in-polygon";
-import type { RoomGeometry, RoomOpening, Vertex } from "@/lib/geometry/types";
+import { findInwardNormal } from "@/lib/geometry/polygons";
+import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
 import {
   DOOR_EDGE_CLEARANCE_CM,
 } from "@/lib/furniture-planning/room-constraints";
@@ -38,72 +39,6 @@ function subtractIntervals(lengthCm: number, blocked: Span[]): Span[] {
     free.push({ startCm: cursor, endCm: lengthCm });
   }
   return free.filter((span) => span.endCm > span.startCm);
-}
-
-function findInwardNormal(
-  wallPoint: { xCm: number; yCm: number },
-  unitX: number,
-  unitY: number,
-  vertices: Vertex[],
-): { xCm: number; yCm: number } | null {
-  const normal1 = { xCm: -unitY, yCm: unitX };
-  const normal2 = { xCm: unitY, yCm: -unitX };
-
-  for (const delta of [0.5, 1.0, 0.1, 2.0]) {
-    const p1 = { xCm: wallPoint.xCm + normal1.xCm * delta, yCm: wallPoint.yCm + normal1.yCm * delta };
-    const p2 = { xCm: wallPoint.xCm + normal2.xCm * delta, yCm: wallPoint.yCm + normal2.yCm * delta };
-
-    const in1 = isPointInsideOrOnPolygon(p1, vertices);
-    const in2 = isPointInsideOrOnPolygon(p2, vertices);
-
-    if (in1 && !in2) return normal1;
-    if (in2 && !in1) return normal2;
-  }
-
-  // Fallback: check which candidate penetrates further inside the polygon
-  let travel1 = 0;
-  let travel2 = 0;
-  for (let d = 0.5; d <= 200; d += 0.5) {
-    if (isPointInsideOrOnPolygon({ xCm: wallPoint.xCm + normal1.xCm * d, yCm: wallPoint.yCm + normal1.yCm * d }, vertices)) {
-      travel1 = d;
-    } else {
-      break;
-    }
-  }
-  for (let d = 0.5; d <= 200; d += 0.5) {
-    if (isPointInsideOrOnPolygon({ xCm: wallPoint.xCm + normal2.xCm * d, yCm: wallPoint.yCm + normal2.yCm * d }, vertices)) {
-      travel2 = d;
-    } else {
-      break;
-    }
-  }
-
-  // If neither candidate demonstrates positive interior penetration, fail safe
-  if (travel1 <= 0 && travel2 <= 0) {
-    return null;
-  }
-
-  if (travel1 > 0 && travel2 <= 0) {
-    return normal1;
-  }
-
-  if (travel2 > 0 && travel1 <= 0) {
-    return normal2;
-  }
-
-  if (travel1 > travel2) {
-    return normal1;
-  }
-
-  if (travel2 > travel1) {
-    return normal2;
-  }
-
-  // Deterministic tie-breaker: prefer candidate with larger x component, then larger y component
-  if (normal1.xCm !== normal2.xCm) {
-    return normal1.xCm > normal2.xCm ? normal1 : normal2;
-  }
-  return normal1.yCm >= normal2.yCm ? normal1 : normal2;
 }
 
 export function computeFacesOrientation(
