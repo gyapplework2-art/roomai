@@ -62,7 +62,7 @@ function normalizeOrientationDegrees(degrees: number): number {
 
 type Relationship = FurniturePlanItemV11["semanticPlacement"]["relationships"][number];
 
-function getEffectiveRelationships(relationships: Relationship[]) {
+export function getEffectiveRelationships(relationships: Relationship[]) {
   const targetsByType = new Map<Relationship["type"], Relationship>();
   for (const relationship of relationships) {
     if (
@@ -80,7 +80,7 @@ function getEffectiveRelationships(relationships: Relationship[]) {
   };
 }
 
-function findTargetFrontUnit(
+export function findTargetFrontUnit(
   targetItem: FurniturePlanItemV11,
   geometry: RoomGeometry,
 ): { xCm: number; yCm: number } | null {
@@ -111,6 +111,24 @@ function findTargetFrontUnit(
   };
 
   return findInwardNormal(wallPoint, unitX, unitY, geometry.vertices);
+}
+
+export function computeAdjacentCenters(center: { xCm: number; yCm: number }, degrees: number, targetWidth: number, sourceWidth: number, gapCm = ADJACENT_GAP_CM) {
+  const radians = degrees * Math.PI / 180;
+  const axis = { xCm: Math.cos(radians), yCm: Math.sin(radians) };
+  const distance = targetWidth / 2 + gapCm + sourceWidth / 2;
+  return [1, -1].map((side) => ({
+    xCm: Math.round((center.xCm + side * axis.xCm * distance) * 100) / 100,
+    yCm: Math.round((center.yCm + side * axis.yCm * distance) * 100) / 100,
+  }));
+}
+
+export function computeInFrontCenter(center: { xCm: number; yCm: number }, front: { xCm: number; yCm: number }, targetDepth: number, sourceDepth: number, gapCm = IN_FRONT_OF_GAP_CM) {
+  const distance = targetDepth / 2 + gapCm + sourceDepth / 2;
+  return {
+    xCm: Math.round((center.xCm + front.xCm * distance) * 100) / 100,
+    yCm: Math.round((center.yCm + front.yCm * distance) * 100) / 100,
+  };
 }
 
 export function resolveSemanticPlacement(
@@ -377,29 +395,14 @@ function resolvePlacement(
           return { ...item };
         }
 
-        const distance = targetDepth / 2 + IN_FRONT_OF_GAP_CM + sourceDepth / 2;
-        const candidateCenter = {
-          xCm: Math.round((targetCenter.xCm + targetFrontUnit.xCm * distance) * 100) / 100,
-          yCm: Math.round((targetCenter.yCm + targetFrontUnit.yCm * distance) * 100) / 100,
-        };
+        const candidateCenter = computeInFrontCenter(targetCenter, targetFrontUnit, targetDepth, sourceDepth);
 
         if (!isPointInsideOrOnPolygon(candidateCenter, geometry.vertices)) {
           return { ...item };
         }
         sourceCenter = candidateCenter;
       } else if (posRel.type === "ADJACENT_TO") {
-        const thetaRad = (targetTheta * Math.PI) / 180;
-        const targetWidthAxis = { xCm: Math.cos(thetaRad), yCm: Math.sin(thetaRad) };
-        const distance = targetWidth / 2 + ADJACENT_GAP_CM + sourceWidth / 2;
-
-        const posA = {
-          xCm: Math.round((targetCenter.xCm + targetWidthAxis.xCm * distance) * 100) / 100,
-          yCm: Math.round((targetCenter.yCm + targetWidthAxis.yCm * distance) * 100) / 100,
-        };
-        const posB = {
-          xCm: Math.round((targetCenter.xCm - targetWidthAxis.xCm * distance) * 100) / 100,
-          yCm: Math.round((targetCenter.yCm - targetWidthAxis.yCm * distance) * 100) / 100,
-        };
+        const [posA, posB] = computeAdjacentCenters(targetCenter, targetTheta, targetWidth, sourceWidth);
 
         const validA = isPointInsideOrOnPolygon(posA, geometry.vertices);
         const validB = isPointInsideOrOnPolygon(posB, geometry.vertices);

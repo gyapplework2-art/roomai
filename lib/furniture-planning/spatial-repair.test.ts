@@ -8,6 +8,7 @@ import type { FurniturePlanItemV11, FurniturePlanV11 } from "./types";
 import { validateSpatialPlan } from "./spatial-validator";
 import { repairSpatialPlan, SPATIAL_REPAIR_LIMITS, compareRepairScores, getRepairScore, LOCAL_REPAIR_DISTANCES_CM } from "./spatial-repair";
 import { resolveLivingRoomComposition } from "./role-plan";
+import { computeFacesOrientation } from "./semantic-resolver";
 
 const room = createRectangleGeometry(500, 400, 250);
 const zones = deriveFunctionalZones(room);
@@ -90,7 +91,7 @@ test("structural copies preserve semantic intent, relationships, sizes, orientat
   moving.semanticPlacement.relationships = [{ type: "FACES", targetItemId: "target" }];
   const source = plan([moving, target]);
   const snapshot = structuredClone({ source, room, door, zones });
-  const result = repairSpatialPlan(source, room, [door], zones);
+  const result = repairSpatialPlan(source, room, [door], zones, { relationshipRepairs: false });
   assert.equal(result.status, "REPAIRED");
   const repaired = result.repairedPlan.items.find((entry) => entry.id === moving.id);
   assert.ok(repaired);
@@ -386,12 +387,12 @@ test("repair limits cannot be enlarged into unbounded local search", () => {
   assert.throws(() => repairSpatialPlan(source, room, [], [], { limits: { maxTotalCandidateEvaluations: Infinity } }), /INVALID_REPAIR_LIMITS/);
 });
 
-test("real A.2.3 chair repair is deterministic, preserves intent, and never increases physical failures", () => {
+test("A.4.1 compatibility mode still safely refuses the real A.2.3 chair fixture", () => {
   const composition = resolveLivingRoomComposition({ geometry: room, mustHaveItems: ["sofa", "chair", "chair"] }, [door]);
   const snapshot = structuredClone({ composition, room, door });
   const original = validateSpatialPlan(composition.plan, room, [door], composition.zones);
   assert.equal(original.summary.p0Count, 3);
-  const result = repairSpatialPlan(composition.plan, room, [door], composition.zones, { report: original });
+  const result = repairSpatialPlan(composition.plan, room, [door], composition.zones, { report: original, relationshipRepairs: false });
   assert.equal(result.status, "UNREPAIRABLE");
   assert.equal(result.diagnostics.terminationReason, "NO_STRICT_IMPROVEMENT");
   assert.equal(result.attempts.length, 40);
@@ -411,7 +412,7 @@ test("real A.2.3 chair repair is deterministic, preserves intent, and never incr
     assert.equal(repaired.placement.anchorWallId, before.placement.anchorWallId);
   }
   assert.deepEqual(result.finalReport, validateSpatialPlan(result.repairedPlan, room, [door], composition.zones));
-  assert.deepEqual(repairSpatialPlan(composition.plan, room, [door], composition.zones, { report: original }), result);
+  assert.deepEqual(repairSpatialPlan(composition.plan, room, [door], composition.zones, { report: original, relationshipRepairs: false }), result);
   assert.deepEqual({ composition, room, door }, snapshot);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
 });
@@ -465,4 +466,249 @@ test("returned structural copies cannot alter original semantic arrays or item m
   result.repairedPlan.items[0].sizeRange.widthMaxCm = 1000;
   assert.deepEqual(source, snapshot);
   assert.deepEqual(result.originalPlan, snapshot);
+});
+
+function relationshipFixture() {
+  const anchor = item("semantic-anchor", 250, 45, 220, 90);
+  anchor.semanticPlacement.role = "PRIMARY_SEATING";
+  anchor.semanticPlacement.mode = "AGAINST_WALL";
+  anchor.semanticPlacement.targetWallId = "wall-1";
+  anchor.placement.anchorWallId = "wall-1";
+  const members = ["dependent-a", "dependent-b"].map((id) => {
+    const dependent = item(id, 90, 45, 80, 80);
+    dependent.placement.preferredOrientationDegrees = 270;
+    dependent.semanticPlacement.role = "SECONDARY_SEATING";
+    dependent.semanticPlacement.relationships = [{ type: "ADJACENT_TO", targetItemId: anchor.id }, { type: "FACES", targetItemId: anchor.id }];
+    return dependent;
+  });
+  return plan([anchor, ...members]);
+}
+
+const topDoor = { ...door, wallSegmentId: "wall-3", offsetCm: 50 };
+
+test("coordinated opposite-side repair preserves the anchor and atomically re-establishes FACES", () => {
+  const source = relationshipFixture();
+  const snapshot = structuredClone({ source, room, zones, topDoor });
+  const result = repairSpatialPlan(source, room, [topDoor], zones);
+  assert.equal(result.status, "REPAIRED");
+  assert.equal(result.originalReport.summary.p0Count, 1);
+  assert.equal(result.finalReport.summary.p0Count, 0);
+  const accepted = result.attempts.find((attempt) => attempt.accepted);
+  assert.ok(accepted);
+  assert.equal(accepted.strategy, "RELATIONSHIP_COORDINATED");
+  assert.deepEqual(result.repairedPlan.items[0], source.items[0]);
+  assert.deepEqual(result.repairedPlan.items[1].placement.approximatePosition, { xCm: 410, yCm: 45 });
+  assert.deepEqual(result.repairedPlan.items[2].placement.approximatePosition, { xCm: 90, yCm: 45 });
+  assert.equal(result.repairedPlan.items[1].placement.preferredOrientationDegrees, 90);
+  assert.equal(result.repairedPlan.items[2].placement.preferredOrientationDegrees, 270);
+  assert.deepEqual(result.changedItemIds, ["dependent-a"]);
+  assert.deepEqual(accepted.changedItemIds, result.changedItemIds);
+  assert.equal(accepted.movementCostCm, 320);
+  assert.ok(accepted.movements.some((movement) => movement.orientationChange?.after === 90));
+  for (const member of result.repairedPlan.items) {
+    const original = source.items.find((item) => item.id === member.id);
+    assert.ok(original);
+    assert.deepEqual(member.semanticPlacement, original.semanticPlacement);
+    assert.deepEqual(member.sizeRange, original.sizeRange);
+  }
+  assert.deepEqual(result.finalReport, validateSpatialPlan(result.repairedPlan, room, [topDoor], zones));
+  assert.deepEqual(repairSpatialPlan(source, room, [topDoor], zones), result);
+  const reversed = repairSpatialPlan({ ...source, items: [...source.items].reverse() }, room, [topDoor], zones);
+  assert.deepEqual(reversed.finalReport, result.finalReport);
+  assert.deepEqual(reversed.attempts, result.attempts);
+  assert.deepEqual(reversed.changedItemIds, result.changedItemIds);
+  assert.deepEqual({ source, room, zones, topDoor }, snapshot);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+});
+
+test("two dependent positions and orientations are applied in one authoritative candidate", () => {
+  const source = relationshipFixture();
+  source.items[1].placement.approximatePosition = { xCm: 250, yCm: 45 };
+  source.items[2].placement.approximatePosition = { xCm: 250, yCm: 45 };
+  const result = repairSpatialPlan(source, room, [topDoor], zones);
+  const accepted = result.attempts.find((attempt) => attempt.accepted);
+  assert.ok(accepted);
+  assert.equal(accepted.strategy, "RELATIONSHIP_COORDINATED");
+  assert.deepEqual(accepted.changedItemIds, ["dependent-a", "dependent-b"]);
+  assert.equal(accepted.before.hardP0, 3);
+  assert.equal(accepted.after.hardP0, 0);
+  assert.equal(result.attempts.filter((attempt) => attempt.accepted).length, 1);
+  assert.deepEqual(result.changedItemIds, ["dependent-a", "dependent-b"]);
+});
+
+test("single positional dependent repair uses relative geometry, not arbitrary world translations", () => {
+  const source = relationshipFixture();
+  source.items = source.items.filter((item) => item.id !== "dependent-a");
+  source.items[1].placement.approximatePosition = { xCm: 250, yCm: 45 };
+  const result = repairSpatialPlan(source, room, [topDoor], zones);
+  assert.equal(result.status, "REPAIRED");
+  assert.ok(result.attempts.every((attempt) => attempt.strategy === "RELATIONSHIP_SINGLE"));
+  assert.deepEqual(result.repairedPlan.items[1].placement.approximatePosition, { xCm: 410, yCm: 45 });
+  assert.deepEqual(result.repairedPlan.items[0], source.items[0]);
+});
+
+test("FACES-only local movement can update orientation while preserving all intent fields", () => {
+  const target = item("target", 250, 300);
+  const moving = item("outside-faces", 20, 150, 80, 40);
+  moving.placement.preferredOrientationDegrees = 37;
+  moving.semanticPlacement.relationships = [{ type: "FACES", targetItemId: target.id }];
+  const source = plan([moving, target]);
+  const result = repairSpatialPlan(source, room, [topDoor], zones);
+  assert.equal(result.finalReport.summary.p0Count, 0);
+  const repaired = result.repairedPlan.items[0];
+  assert.ok(repaired.placement.approximatePosition && target.placement.approximatePosition);
+  assert.equal(repaired.placement.preferredOrientationDegrees, computeFacesOrientation(repaired.placement.approximatePosition, target.placement.approximatePosition));
+  assert.deepEqual(repaired.semanticPlacement, moving.semanticPlacement);
+  assert.ok(result.attempts.find((attempt) => attempt.accepted)?.movements[0].orientationChange);
+});
+
+test("IN_FRONT_OF repairs preserve wall-derived inward geometry and stop without targeting P1", () => {
+  const anchor = relationshipFixture().items[0];
+  const table = item("table-front", 250, 70, 100, 60);
+  table.semanticPlacement.role = "COFFEE_TABLE";
+  table.semanticPlacement.relationships = [{ type: "IN_FRONT_OF", targetItemId: anchor.id }];
+  const source = plan([anchor, table]);
+  const result = repairSpatialPlan(source, room, [topDoor], zones);
+  assert.equal(result.finalReport.summary.p0Count, 0);
+  assert.equal(result.originalReport.summary.p0Count, 1);
+  assert.deepEqual(result.repairedPlan.items[0], anchor);
+  assert.deepEqual(result.repairedPlan.items[1].placement.approximatePosition, { xCm: 250, yCm: 160 });
+  assert.equal(result.repairedPlan.items[1].placement.preferredOrientationDegrees, table.placement.preferredOrientationDegrees);
+  assert.deepEqual(result.repairedPlan.items[1].semanticPlacement, table.semanticPlacement);
+  assert.equal(result.attempts.filter((attempt) => attempt.accepted).length, 1);
+});
+
+test("invalid references and positional cycles fail safely without world-space semantic drift", () => {
+  const first = item("a", 200, 200);
+  const second = item("b", 200, 200);
+  first.semanticPlacement.relationships = [{ type: "ADJACENT_TO", targetItemId: "b" }];
+  second.semanticPlacement.relationships = [{ type: "ADJACENT_TO", targetItemId: "a" }];
+  const source = plan([first, second]);
+  const result = repairSpatialPlan(source, room, [topDoor], zones);
+  assert.deepEqual(result.repairedPlan, source);
+  assert.deepEqual(result.attempts, []);
+  assert.equal(result.status, "NOT_REPAIRABLE");
+  const missing = item("missing-target", 20, 150, 80, 40);
+  missing.semanticPlacement.relationships = [{ type: "ADJACENT_TO", targetItemId: "missing" }];
+  assert.deepEqual(repairSpatialPlan(plan([missing]), room, [topDoor], zones).repairedPlan, plan([missing]));
+});
+
+test("relationship candidate budgets share the existing total/per-iteration limits", () => {
+  const source = relationshipFixture();
+  source.items[1].placement.approximatePosition = { xCm: 250, yCm: 45 };
+  source.items[2].placement.approximatePosition = { xCm: 250, yCm: 45 };
+  const result = repairSpatialPlan(source, room, [topDoor], zones, { limits: { maxCandidatesPerIteration: 1, maxTotalCandidateEvaluations: 1 } });
+  assert.equal(result.attempts.length, 1);
+  assert.equal(result.attempts[0].strategy, "RELATIONSHIP_COORDINATED");
+  assert.equal(result.diagnostics.totalCandidateEvaluations, 1);
+  assert.ok(result.attempts.every((attempt) => attempt.after.hardP0 < attempt.before.hardP0 || !attempt.accepted));
+});
+
+test("rejected coordinated P0 trades never leak changed positions or orientations", () => {
+  const geometry = createRectangleGeometry(150, 150, 250);
+  const anchor = item("anchor", 75, 75, 100, 100);
+  anchor.semanticPlacement.role = "PRIMARY_SEATING";
+  const first = item("a", 75, 75, 100, 100);
+  const second = item("b", 75, 75, 100, 100);
+  for (const member of [first, second]) member.semanticPlacement.relationships = [{ type: "ADJACENT_TO", targetItemId: anchor.id }, { type: "FACES", targetItemId: anchor.id }];
+  const source = plan([anchor, first, second]);
+  const result = repairSpatialPlan(source, geometry);
+  assert.equal(result.status, "UNREPAIRABLE");
+  assert.ok(result.attempts.some((attempt) => attempt.strategy === "RELATIONSHIP_COORDINATED"));
+  assert.ok(result.attempts.every((attempt) => !attempt.accepted));
+  assert.deepEqual(result.repairedPlan, source);
+  assert.deepEqual(result.changedItemIds, []);
+});
+
+test("real A.2.3 coordinated repair improves where A.4.1 could not, without moving sofa or changing chair semantics", () => {
+  const composition = resolveLivingRoomComposition({ geometry: room, mustHaveItems: ["sofa", "chair", "chair"] }, [door]);
+  const snapshot = structuredClone({ composition, room, door });
+  const legacy = repairSpatialPlan(composition.plan, room, [door], composition.zones, { relationshipRepairs: false });
+  assert.equal(legacy.originalReport.summary.p0Count, 3);
+  assert.equal(legacy.status, "UNREPAIRABLE");
+  const result = repairSpatialPlan(composition.plan, room, [door], composition.zones);
+  assert.equal(result.finalReport.summary.p0Count, 1);
+  assert.equal(result.finalReport.summary.p1Count, 1);
+  assert.ok(result.finalReport.summary.p0Count < 3);
+  assert.equal(result.status, "PARTIALLY_REPAIRED");
+  const accepted = result.attempts.find((attempt) => attempt.accepted);
+  assert.equal(accepted?.strategy, "RELATIONSHIP_COORDINATED");
+  for (const id of ["chairs-1", "chairs-2"]) {
+    const original = composition.plan.items.find((member) => member.id === id);
+    const repaired = result.repairedPlan.items.find((member) => member.id === id);
+    const anchor = result.repairedPlan.items.find((member) => member.id === "primary-seating-1");
+    assert.ok(original && repaired?.placement.approximatePosition && anchor?.placement.approximatePosition);
+    assert.deepEqual(repaired.semanticPlacement, original.semanticPlacement);
+    assert.deepEqual(repaired.sizeRange, original.sizeRange);
+    assert.equal(repaired.placement.preferredOrientationDegrees, computeFacesOrientation(repaired.placement.approximatePosition, anchor.placement.approximatePosition));
+  }
+  assert.deepEqual(result.repairedPlan.items.find((member) => member.id === "primary-seating-1"), composition.plan.items.find((member) => member.id === "primary-seating-1"));
+  assert.notDeepEqual(result.repairedPlan.items.find((member) => member.id === "chairs-1")?.placement.approximatePosition, result.repairedPlan.items.find((member) => member.id === "chairs-2")?.placement.approximatePosition);
+  assert.deepEqual(result.finalReport, validateSpatialPlan(result.repairedPlan, room, [door], composition.zones));
+  assert.deepEqual(repairSpatialPlan(composition.plan, room, [door], composition.zones), result);
+  const reversed = repairSpatialPlan({ ...composition.plan, items: [...composition.plan.items].reverse() }, room, [door], composition.zones);
+  assert.deepEqual(reversed.attempts, result.attempts);
+  assert.deepEqual(reversed.changedItemIds, result.changedItemIds);
+  assert.deepEqual(reversed.finalReport, result.finalReport);
+  assert.deepEqual({ composition, room, door }, snapshot);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+});
+
+test("IN_FRONT_OF P0 repair can leave functional clearance invalid and must stop rather than target P1", () => {
+  const anchor = relationshipFixture().items[0];
+  const table = item("rotated-table", 250, 70, 100, 60);
+  table.placement.preferredOrientationDegrees = 37;
+  table.semanticPlacement.role = "COFFEE_TABLE";
+  table.semanticPlacement.relationships = [{ type: "IN_FRONT_OF", targetItemId: anchor.id }];
+  const result = repairSpatialPlan(plan([anchor, table]), room, [topDoor], zones, { limits: { maxCandidatesPerIteration: 1, maxTotalCandidateEvaluations: 1 } });
+  assert.equal(result.status, "PARTIALLY_REPAIRED");
+  assert.equal(result.finalReport.summary.p0Count, 0);
+  assert.equal(result.finalReport.summary.p1Count, 1);
+  assert.equal(result.attempts.length, 1);
+  assert.equal(result.attempts[0].strategy, "RELATIONSHIP_SINGLE");
+  assert.equal(result.repairedPlan.items[1].placement.preferredOrientationDegrees, 37);
+  assert.equal(result.diagnostics.terminationReason, "PHYSICAL_FAILURES_RESOLVED");
+});
+
+test("a front-positioned secondary anchor carries its adjacent descendant in one accepted plan", () => {
+  const anchor = relationshipFixture().items[0];
+  const table = item("table", 250, 70, 100, 60);
+  table.semanticPlacement.role = "COFFEE_TABLE";
+  table.semanticPlacement.relationships = [{ type: "IN_FRONT_OF", targetItemId: anchor.id }];
+  const child = item("dependent", 100, 70, 40, 40);
+  child.semanticPlacement.relationships = [{ type: "ADJACENT_TO", targetItemId: table.id }, { type: "FACES", targetItemId: table.id }];
+  const source = plan([child, table, anchor]);
+  const result = repairSpatialPlan(source, room, [topDoor], zones);
+  assert.equal(result.finalReport.summary.p0Count, 0);
+  const accepted = result.attempts.find((attempt) => attempt.accepted);
+  assert.equal(accepted?.strategy, "RELATIONSHIP_COORDINATED");
+  assert.deepEqual(accepted?.changedItemIds, ["dependent", "table"]);
+  assert.deepEqual(result.repairedPlan.items.find((member) => member.id === "table")?.placement.approximatePosition, { xCm: 250, yCm: 160 });
+  assert.deepEqual(result.repairedPlan.items.find((member) => member.id === "dependent")?.placement.approximatePosition, { xCm: 170, yCm: 160 });
+  assert.deepEqual(result.repairedPlan.items.find((member) => member.id === anchor.id), anchor);
+  assert.deepEqual(result.finalReport, validateSpatialPlan(result.repairedPlan, room, [topDoor], zones));
+});
+
+test("changedItemIds includes an orientation-only FACES descendant, not unchanged participants", () => {
+  const anchor = relationshipFixture().items[0];
+  const table = item("table", 250, 70, 100, 60);
+  table.semanticPlacement.role = "COFFEE_TABLE";
+  table.semanticPlacement.relationships = [{ type: "IN_FRONT_OF", targetItemId: anchor.id }];
+  const observer = item("observer", 450, 200, 40, 40);
+  observer.placement.preferredOrientationDegrees = 37;
+  observer.semanticPlacement.relationships = [{ type: "FACES", targetItemId: table.id }];
+  const source = plan([anchor, table, observer]);
+  const result = repairSpatialPlan(source, room, [topDoor], zones);
+  assert.equal(result.finalReport.summary.p0Count, 0);
+  assert.deepEqual(result.changedItemIds, ["observer", "table"]);
+  const repairedObserver = result.repairedPlan.items.find((member) => member.id === observer.id);
+  assert.ok(repairedObserver);
+  assert.deepEqual(repairedObserver.placement.approximatePosition, observer.placement.approximatePosition);
+  assert.notEqual(repairedObserver.placement.preferredOrientationDegrees, 37);
+  assert.deepEqual(repairedObserver.semanticPlacement, observer.semanticPlacement);
+  const accepted = result.attempts.find((attempt) => attempt.accepted);
+  const movement = accepted?.movements.find((member) => member.itemId === observer.id);
+  assert.deepEqual(movement?.offset, { dxCm: 0, dyCm: 0 });
+  assert.ok(movement?.orientationChange);
+  assert.equal(accepted?.movementCostCm, 90);
 });
