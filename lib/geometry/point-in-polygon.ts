@@ -1,15 +1,17 @@
+import { GEOMETRY_EPSILON } from "@/lib/geometry/dimensions";
 import type { Vertex } from "@/lib/geometry/types";
 
-const EPSILON = 1e-6;
+const EPSILON = GEOMETRY_EPSILON;
 
-export function isPointInsideOrOnPolygon(point: { xCm: number; yCm: number }, vertices: Vertex[]) {
+export function isPointInsideOrOnPolygon(point: { xCm: number; yCm: number }, vertices: readonly Pick<Vertex, "xCm" | "yCm">[]) {
   let inside = false;
   for (let index = 0, previous = vertices.length - 1; index < vertices.length; previous = index++) {
     const current = vertices[index];
     const prior = vertices[previous];
     const cross = (current.xCm - prior.xCm) * (point.yCm - prior.yCm)
       - (current.yCm - prior.yCm) * (point.xCm - prior.xCm);
-    const onSegment = Math.abs(cross) <= EPSILON
+    const length = Math.hypot(current.xCm - prior.xCm, current.yCm - prior.yCm);
+    const onSegment = (length === 0 || Math.abs(cross / length) <= EPSILON)
       && point.xCm >= Math.min(prior.xCm, current.xCm) - EPSILON
       && point.xCm <= Math.max(prior.xCm, current.xCm) + EPSILON
       && point.yCm >= Math.min(prior.yCm, current.yCm) - EPSILON

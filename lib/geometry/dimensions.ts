@@ -1,5 +1,6 @@
 import type { RoomGeometry, Vertex, WallSegment } from "@/lib/geometry/types";
 
+/** Shared 1e-6 cm tolerance for point/segment distances and unit-axis SAT overlap projections. */
 export const GEOMETRY_EPSILON = 1e-6;
 
 export type WallOrientation = "horizontal" | "vertical" | "diagonal";

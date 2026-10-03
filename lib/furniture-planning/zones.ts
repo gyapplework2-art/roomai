@@ -1,7 +1,8 @@
 import { z } from "zod";
 
-import { GEOMETRY_EPSILON, getGeometryBounds } from "@/lib/geometry/dimensions";
+import { getGeometryBounds } from "@/lib/geometry/dimensions";
 import { isPointInsideOrOnPolygon } from "@/lib/geometry/point-in-polygon";
+import { polygonInsidePolygon } from "@/lib/geometry/polygons";
 import { vertexSchema } from "@/lib/geometry/schema";
 import type { RoomGeometry, Vertex } from "@/lib/geometry/types";
 import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
@@ -18,39 +19,6 @@ export const functionalZoneSchema = z.object({
 });
 
 export type FunctionalZone = z.infer<typeof functionalZoneSchema>;
-
-function zoneEdgeInsideRoom(start: Vertex, end: Vertex, geometry: RoomGeometry): boolean {
-  const deltaX = end.xCm - start.xCm;
-  const deltaY = end.yCm - start.yCm;
-  const lengthSquared = deltaX * deltaX + deltaY * deltaY;
-  if (lengthSquared <= GEOMETRY_EPSILON ** 2) return false;
-  const cuts = [0, 1];
-  geometry.vertices.forEach((boundaryStart, index) => {
-    const boundaryEnd = geometry.vertices[(index + 1) % geometry.vertices.length];
-    const boundaryX = boundaryEnd.xCm - boundaryStart.xCm;
-    const boundaryY = boundaryEnd.yCm - boundaryStart.yCm;
-    const offsetX = boundaryStart.xCm - start.xCm;
-    const offsetY = boundaryStart.yCm - start.yCm;
-    const denominator = deltaX * boundaryY - deltaY * boundaryX;
-    if (Math.abs(denominator) <= GEOMETRY_EPSILON) {
-      if (Math.abs(offsetX * deltaY - offsetY * deltaX) <= GEOMETRY_EPSILON) {
-        for (const point of [boundaryStart, boundaryEnd]) {
-          const distance = ((point.xCm - start.xCm) * deltaX + (point.yCm - start.yCm) * deltaY) / lengthSquared;
-          if (distance > 0 && distance < 1) cuts.push(distance);
-        }
-      }
-      return;
-    }
-    const distance = (offsetX * boundaryY - offsetY * boundaryX) / denominator;
-    const boundaryDistance = (offsetX * deltaY - offsetY * deltaX) / denominator;
-    if (distance > 0 && distance < 1 && boundaryDistance >= 0 && boundaryDistance <= 1) cuts.push(distance);
-  });
-  cuts.sort((first, second) => first - second);
-  return cuts.slice(1).every((endDistance, index) => {
-    const midpoint = (cuts[index] + endDistance) / 2;
-    return isPointInsideOrOnPolygon({ xCm: start.xCm + deltaX * midpoint, yCm: start.yCm + deltaY * midpoint }, geometry.vertices);
-  });
-}
 
 function polygonCenter(vertices: Vertex[]) {
   let twiceArea = 0;
@@ -106,8 +74,7 @@ export function isValidFunctionalZone(zone: FunctionalZone, geometry: RoomGeomet
     && polygonCenter(polygon) !== null
     && isPointInsideOrOnPolygon(center, polygon)
     && isPointInsideOrOnPolygon(center, geometry.vertices)
-    && polygon.every((vertex, index) => isPointInsideOrOnPolygon(vertex, geometry.vertices)
-      && zoneEdgeInsideRoom(vertex, polygon[(index + 1) % polygon.length], geometry));
+    && polygonInsidePolygon(polygon, geometry.vertices);
 }
 
 /**

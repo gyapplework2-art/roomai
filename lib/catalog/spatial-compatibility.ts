@@ -6,6 +6,14 @@ import {
 } from "@/lib/furniture-planning/room-constraints";
 import { getOpeningWorldPosition } from "@/lib/geometry/openings";
 import { isPointInsideOrOnPolygon } from "@/lib/geometry/point-in-polygon";
+import { GEOMETRY_EPSILON } from "@/lib/geometry/dimensions";
+import {
+  createOrientedRectangle as rotatedFootprint,
+  rectanglesOverlapWithPositiveArea as footprintsOverlapWithPositiveArea,
+  segmentIntersectsPolygon as segmentIntersectsFootprint,
+  type Point,
+  type Rectangle as Footprint,
+} from "@/lib/geometry/polygons";
 import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
 import type { Tables } from "@/types/database.types";
 
@@ -32,50 +40,6 @@ function isFinitePositive(value: number | null): value is number {
   return value !== null && Number.isFinite(value) && value > 0;
 }
 
-type Point = { xCm: number; yCm: number };
-type Footprint = [Point, Point, Point, Point];
-const GEOMETRY_EPSILON = 1e-6;
-
-function rotatedFootprint(
-  center: Point,
-  widthCm: number,
-  depthCm: number,
-  rotationDegrees: number,
-): Footprint {
-  const radians = (rotationDegrees * Math.PI) / 180;
-  const widthAxis = { xCm: Math.cos(radians), yCm: Math.sin(radians) };
-  const depthAxis = { xCm: -Math.sin(radians), yCm: Math.cos(radians) };
-  const halfWidth = widthCm / 2;
-  const halfDepth = depthCm / 2;
-  return [
-    { xCm: center.xCm - widthAxis.xCm * halfWidth - depthAxis.xCm * halfDepth, yCm: center.yCm - widthAxis.yCm * halfWidth - depthAxis.yCm * halfDepth },
-    { xCm: center.xCm + widthAxis.xCm * halfWidth - depthAxis.xCm * halfDepth, yCm: center.yCm + widthAxis.yCm * halfWidth - depthAxis.yCm * halfDepth },
-    { xCm: center.xCm + widthAxis.xCm * halfWidth + depthAxis.xCm * halfDepth, yCm: center.yCm + widthAxis.yCm * halfWidth + depthAxis.yCm * halfDepth },
-    { xCm: center.xCm - widthAxis.xCm * halfWidth + depthAxis.xCm * halfDepth, yCm: center.yCm - widthAxis.yCm * halfWidth + depthAxis.yCm * halfDepth },
-  ];
-}
-
-function projection(polygon: Footprint, axis: Point) {
-  const values = polygon.map((point) => point.xCm * axis.xCm + point.yCm * axis.yCm);
-  return { min: Math.min(...values), max: Math.max(...values) };
-}
-
-function footprintsOverlapWithPositiveArea(first: Footprint, second: Footprint): boolean {
-  const axes = [first, second].flatMap((polygon) => [0, 1].map((index) => {
-    const start = polygon[index];
-    const end = polygon[index + 1];
-    const edge = { xCm: end.xCm - start.xCm, yCm: end.yCm - start.yCm };
-    const length = Math.hypot(edge.xCm, edge.yCm);
-    return { xCm: -edge.yCm / length, yCm: edge.xCm / length };
-  }));
-  return axes.every((axis) => {
-    const firstProjection = projection(first, axis);
-    const secondProjection = projection(second, axis);
-    return Math.min(firstProjection.max, secondProjection.max)
-      - Math.max(firstProjection.min, secondProjection.min) > GEOMETRY_EPSILON;
-  });
-}
-
 function openingClearanceFootprint(start: Point, end: Point, clearanceCm: number): Footprint | null {
   const dx = end.xCm - start.xCm;
   const dy = end.yCm - start.yCm;
@@ -84,44 +48,6 @@ function openingClearanceFootprint(start: Point, end: Point, clearanceCm: number
   const center = { xCm: (start.xCm + end.xCm) / 2, yCm: (start.yCm + end.yCm) / 2 };
   const rotationDegrees = (Math.atan2(dy, dx) * 180) / Math.PI;
   return rotatedFootprint(center, length + clearanceCm * 2, clearanceCm * 2, rotationDegrees);
-}
-
-function pointOnSegment(point: Point, start: Point, end: Point): boolean {
-  const cross = (end.xCm - start.xCm) * (point.yCm - start.yCm)
-    - (end.yCm - start.yCm) * (point.xCm - start.xCm);
-  if (Math.abs(cross) > GEOMETRY_EPSILON) return false;
-  return point.xCm >= Math.min(start.xCm, end.xCm) - GEOMETRY_EPSILON
-    && point.xCm <= Math.max(start.xCm, end.xCm) + GEOMETRY_EPSILON
-    && point.yCm >= Math.min(start.yCm, end.yCm) - GEOMETRY_EPSILON
-    && point.yCm <= Math.max(start.yCm, end.yCm) + GEOMETRY_EPSILON;
-}
-
-function orientation(first: Point, second: Point, third: Point): number {
-  return (second.xCm - first.xCm) * (third.yCm - first.yCm)
-    - (second.yCm - first.yCm) * (third.xCm - first.xCm);
-}
-
-function segmentsIntersect(firstStart: Point, firstEnd: Point, secondStart: Point, secondEnd: Point): boolean {
-  const firstA = orientation(firstStart, firstEnd, secondStart);
-  const firstB = orientation(firstStart, firstEnd, secondEnd);
-  const secondA = orientation(secondStart, secondEnd, firstStart);
-  const secondB = orientation(secondStart, secondEnd, firstEnd);
-  if (firstA * firstB < -GEOMETRY_EPSILON && secondA * secondB < -GEOMETRY_EPSILON) return true;
-  return (Math.abs(firstA) <= GEOMETRY_EPSILON && pointOnSegment(secondStart, firstStart, firstEnd))
-    || (Math.abs(firstB) <= GEOMETRY_EPSILON && pointOnSegment(secondEnd, firstStart, firstEnd))
-    || (Math.abs(secondA) <= GEOMETRY_EPSILON && pointOnSegment(firstStart, secondStart, secondEnd))
-    || (Math.abs(secondB) <= GEOMETRY_EPSILON && pointOnSegment(firstEnd, secondStart, secondEnd));
-}
-
-function segmentIntersectsFootprint(start: Point, end: Point, footprint: Footprint): boolean {
-  const vertices = footprint.map((point, index) => ({ ...point, id: `footprint-${index}` }));
-  if (isPointInsideOrOnPolygon(start, vertices) || isPointInsideOrOnPolygon(end, vertices)) return true;
-  return footprint.some((corner, index) => segmentsIntersect(
-    start,
-    end,
-    corner,
-    footprint[(index + 1) % footprint.length],
-  ));
 }
 
 export function evaluateCatalogReplacementSpatialCompatibility(
