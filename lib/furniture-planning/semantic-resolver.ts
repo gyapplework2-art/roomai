@@ -5,6 +5,7 @@ import {
   DOOR_EDGE_CLEARANCE_CM,
 } from "@/lib/furniture-planning/room-constraints";
 import type { FurniturePlanItemV11, FurniturePlanV11 } from "@/lib/furniture-planning/types";
+import { isValidFunctionalZone, type FunctionalZone } from "@/lib/furniture-planning/zones";
 
 export const WALL_ALIGNMENT_MARGIN_CM = 10;
 export const NEAR_WALL_GAP_CM = 15;
@@ -182,8 +183,9 @@ export function resolveSemanticPlacement(
   geometry: RoomGeometry,
   openings: RoomOpening[] = [],
   resolvedItemsById?: ReadonlyMap<string, FurniturePlanItemV11>,
+  zones: readonly FunctionalZone[] = [],
 ): FurniturePlanItemV11 {
-  return resolvePlacement(item, geometry, openings, resolvedItemsById);
+  return resolvePlacement(item, geometry, openings, resolvedItemsById, undefined, zones);
 }
 
 function resolvePlacement(
@@ -192,6 +194,7 @@ function resolvePlacement(
   openings: RoomOpening[] = [],
   resolvedItemsById?: ReadonlyMap<string, FurniturePlanItemV11>,
   planningWidthsById?: Map<string, number>,
+  zones: readonly FunctionalZone[] = [],
 ): FurniturePlanItemV11 {
   if (!("semanticPlacement" in item) || !item.semanticPlacement) {
     return { ...item };
@@ -365,13 +368,26 @@ function resolvePlacement(
   }
 
   // Case B: FLOATING mode with relational placement
-  if (mode === "FLOATING") {
+  if (mode === "FLOATING" || mode === "CENTERED_IN_ZONE") {
     const effective = getEffectiveRelationships(relationships ?? []);
     if (!effective) return { ...item };
     const { positional: posRel, faces: facesRel } = effective;
 
+    let basePlacement = item.placement;
+    if (mode === "CENTERED_IN_ZONE" && !posRel) {
+      const matchingZones = zones.filter((zone) => zone.id === item.semanticPlacement.zoneId);
+      if (matchingZones.length !== 1 || !isValidFunctionalZone(matchingZones[0], geometry)) return { ...item };
+      const zone = matchingZones[0];
+      basePlacement = {
+        preferredZone: zone.id,
+        anchorWallId: null,
+        approximatePosition: { ...zone.center },
+        preferredOrientationDegrees: normalizeOrientationDegrees(zone.orientationDegrees ?? 0),
+      };
+    }
+
     if (!posRel && !facesRel) {
-      return { ...item };
+      return { ...item, placement: basePlacement };
     }
 
     if (!resolvedItemsById) {
@@ -505,7 +521,7 @@ function resolvePlacement(
       if (facesRel.targetItemId === item.id) {
         return { ...item };
       }
-      const sourcePos = item.placement.approximatePosition;
+      const sourcePos = basePlacement.approximatePosition;
       if (
         !sourcePos ||
         !Number.isFinite(sourcePos.xCm) ||
@@ -535,14 +551,14 @@ function resolvePlacement(
       return {
         ...item,
         placement: {
-          ...item.placement,
+          ...basePlacement,
           preferredOrientationDegrees: facesAngle,
         },
       };
     }
   }
 
-  // Case C: CENTERED_IN_ZONE or other unsupported modes preserve compatibility placement
+  // Case C: unsupported modes preserve compatibility placement
   return { ...item };
 }
 
@@ -550,6 +566,7 @@ export function resolveSemanticPlan(
   plan: FurniturePlanV11,
   geometry: RoomGeometry,
   openings: RoomOpening[] = [],
+  zones: readonly FunctionalZone[] = [],
 ): FurniturePlanV11 {
   const planItemIds = new Set(plan.items.map((item) => item.id));
   if (planItemIds.size !== plan.items.length) return plan;
@@ -580,9 +597,12 @@ export function resolveSemanticPlan(
     if (isWallMode) {
       const resolved = resolvePlacement(item, geometry, openings, eligibleTargets, planningWidthsById);
       record(item, resolved, resolved.placement !== item.placement);
-    } else if (mode === "FLOATING") {
+    } else if (mode === "FLOATING" || mode === "CENTERED_IN_ZONE") {
       if (relationships.length > 0) {
         pendingItems.push({ ...item });
+      } else if (mode === "CENTERED_IN_ZONE") {
+        const resolved = resolvePlacement(item, geometry, openings, eligibleTargets, planningWidthsById, zones);
+        record(item, resolved, resolved.placement !== item.placement);
       } else {
         record(item, { ...item }, true);
       }
@@ -626,7 +646,7 @@ export function resolveSemanticPlan(
       // Check if all required targets are resolved
       const allTargetsResolved = requiredTargetIds.every((id) => statuses.get(id) === "eligible");
       if (allTargetsResolved) {
-        const resolved = resolvePlacement(item, geometry, openings, eligibleTargets, planningWidthsById);
+        const resolved = resolvePlacement(item, geometry, openings, eligibleTargets, planningWidthsById, zones);
         record(item, resolved, resolved.placement !== item.placement);
         madeProgress = true;
       } else {
