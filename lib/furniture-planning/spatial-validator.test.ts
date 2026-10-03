@@ -12,8 +12,14 @@ import { validateSpatialPlan } from "./spatial-validator";
 import type { FurniturePlanItem, FurniturePlan, FurniturePlanItemV11 } from "./types";
 import { doorApproachClearanceRule, seatingCoffeeTableClearanceRule, NORMAL_CIRCULATION_PROFILE } from "./clearance-rules";
 import type { CirculationEvaluation } from "./circulation";
+import { compareSpatialViolations } from "./spatial-validation-report";
 
 const room = createRectangleGeometry(500, 400, 250);
+const noDoorReportFields = {
+  schemaVersion: "1.0", status: "NOT_FULLY_EVALUATED",
+  summary: { totalViolations: 0, p0Count: 0, p1Count: 0, p2Count: 0, p3Count: 0, hardCount: 0, softCount: 0 },
+  evaluation: { footprintsEvaluated: true, physicalEvaluated: true, physicalDoorConflictEvaluated: false, functionalClearanceEvaluated: false, circulationEvaluated: false },
+};
 const unavailableCirculation: CirculationEvaluation = {
   status: "NOT_EVALUATED", reason: "NO_DOORS", profileId: NORMAL_CIRCULATION_PROFILE.id,
   minimumPassageWidthCm: 75, targetZoneId: null, evaluatedDoorIds: [], successfulDoorIds: [],
@@ -41,7 +47,7 @@ test("a valid whole-room arrangement is unchanged and has no violations", () => 
   const source = plan([item("a", 100, 100), item("b", 300, 200, 80, 40, 30)]);
   const snapshot = structuredClone(source);
   const geometrySnapshot = structuredClone(room);
-  assert.deepEqual(validateSpatialPlan(source, room), { valid: true, physicallyValid: true, functionallyValid: true, violations: [], circulation: unavailableCirculation });
+  assert.deepEqual(validateSpatialPlan(source, room), { ...noDoorReportFields, valid: true, physicallyValid: true, functionallyValid: true, violations: [], circulation: unavailableCirculation });
   assert.deepEqual(source, snapshot);
   assert.deepEqual(room, geometrySnapshot);
 });
@@ -184,7 +190,7 @@ test("outside and multiple overlaps are reported together with deterministic pai
   assert.deepEqual(overlaps.map((violation) => violation.itemIds), [["a", "m"], ["a", "z"], ["m", "z"]]);
   assert.equal(result.violations.filter((violation) => violation.type === "OUTSIDE_ROOM").length, 2);
   assert.equal(new Set(result.violations.map((violation) => violation.id)).size, result.violations.length);
-  assert.deepEqual(result.violations.map((violation) => violation.id), result.violations.map((violation) => violation.id).sort());
+  assert.deepEqual(result.violations, [...result.violations].sort(compareSpatialViolations));
   for (const order of [[items[2], items[0], items[1]], [...items].reverse()]) {
     assert.deepEqual(validateSpatialPlan(plan(order), room), result);
   }
@@ -258,7 +264,7 @@ test("explicit AREA_RUG role controls floor layering rather than broad category 
     semanticPlacement: { role: "AREA_RUG", mode: "FLOATING", alignment: null, zoneId: null, targetWallId: null, relationships: [], fallbackModes: [] },
   };
   const furniture: FurniturePlanItemV11 = { ...rug, id: "seating", category: "rug", semanticPlacement: { ...rug.semanticPlacement, role: "PRIMARY_SEATING" } };
-  assert.deepEqual(validateSpatialPlan({ schemaVersion: "1.1", roomIntent: "Layering", items: [rug, furniture], notes: [] }, room), { valid: true, physicallyValid: true, functionallyValid: true, violations: [], circulation: unavailableCirculation });
+  assert.deepEqual(validateSpatialPlan({ schemaVersion: "1.1", roomIntent: "Layering", items: [rug, furniture], notes: [] }, room), { ...noDoorReportFields, valid: true, physicallyValid: true, functionallyValid: true, violations: [], circulation: unavailableCirculation });
 });
 
 test("invalid authoritative geometry and malformed doors are rejected as validation preconditions", () => {
@@ -331,6 +337,8 @@ test("initial clearance defaults are explicit hard P1 planning rules, not regula
 for (const gap of [40, 35, 100]) {
   test(`explicit seating/coffee-table boundary gap ${gap} cm passes minimum-only validation`, () => {
     assert.deepEqual(validateSpatialPlan(functionalPlan(relatedTableItems(gap)), room), {
+      ...noDoorReportFields,
+      evaluation: { ...noDoorReportFields.evaluation, functionalClearanceEvaluated: true },
       valid: true, physicallyValid: true, functionallyValid: true, violations: [],
       circulation: unavailableCirculation,
     });
@@ -492,13 +500,13 @@ test("mixed P0/P1 violations retain stable IDs/order, exact inputs and validity 
   const source = functionalPlan(items);
   const snapshot = structuredClone(source);
   const result = validateSpatialPlan(source, room);
-  assert.deepEqual(result.violations.map((violation) => [violation.type, violation.priority]), [["INSUFFICIENT_FUNCTIONAL_CLEARANCE", "P1"], ["OUTSIDE_ROOM", "P0"]]);
+  assert.deepEqual(result.violations.map((violation) => [violation.type, violation.priority]), [["OUTSIDE_ROOM", "P0"], ["INSUFFICIENT_FUNCTIONAL_CLEARANCE", "P1"]]);
   assert.equal(result.valid, false);
   assert.equal(result.physicallyValid, false);
   assert.equal(result.functionallyValid, false);
   assert.deepEqual(validateSpatialPlan(source, room), result);
   assert.deepEqual(validateSpatialPlan({ ...source, items: [...source.items].reverse() }, room), result);
-  assert.deepEqual(result.violations.map((violation) => violation.id), result.violations.map((violation) => violation.id).sort());
+  assert.deepEqual(result.violations, [...result.violations].sort(compareSpatialViolations));
   assert.deepEqual(source, snapshot);
 });
 

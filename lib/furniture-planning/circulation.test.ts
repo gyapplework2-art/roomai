@@ -326,7 +326,7 @@ test("mixed physical and circulation failures retain stable priority and identit
   const items = [furniture("barrier", 200, 200, 400, 40), furniture("outside", 20, 320, 60, 40)];
   const result = validate(items, room, [{ ...primaryZone, center: { xCm: 200, yCm: 330 } }]);
   assert.equal(result.circulation.status, "BLOCKED");
-  assert.deepEqual(result.violations.map((violation) => [violation.type, violation.priority]), [["BLOCKED_CIRCULATION", "P1"], ["OUTSIDE_ROOM", "P0"]]);
+  assert.deepEqual(result.violations.map((violation) => [violation.type, violation.priority]), [["OUTSIDE_ROOM", "P0"], ["BLOCKED_CIRCULATION", "P1"]]);
   assert.deepEqual(validate([...items].reverse(), room, [{ ...primaryZone, center: { xCm: 200, yCm: 330 } }]), result);
 });
 

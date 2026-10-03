@@ -6,9 +6,10 @@ import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
 import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
 import { createFurnitureFootprint, type FootprintIssue, type FurnitureFootprint } from "./footprints";
 import { doorApproachClearanceRule, seatingCoffeeTableClearanceRule, NORMAL_CIRCULATION_PROFILE } from "./clearance-rules";
-import { evaluateCirculation, type CirculationEvaluation } from "./circulation";
+import { evaluateCirculation } from "./circulation";
 import type { FunctionalZone } from "./zones";
 import type { AnyFurniturePlan, AnyFurniturePlanItem } from "./types";
+import { buildWholeRoomValidationReport, type WholeRoomValidationReport } from "./spatial-validation-report";
 
 type Violation<Type extends string, Details, Priority extends "P0" | "P1" = "P0"> = {
   id: string;
@@ -36,7 +37,7 @@ export type SpatialViolation =
   | Violation<"BLOCKED_CIRCULATION", { profileId: string; targetZoneId: string; minimumPassageWidthCm: number; evaluatedDoorIds: string[] }, "P1">;
 
 /** Physical validity excludes hard P0; functional validity excludes hard P1; overall validity requires both. */
-export type SpatialValidationResult = { valid: boolean; physicallyValid: boolean; functionallyValid: boolean; violations: SpatialViolation[]; circulation: CirculationEvaluation };
+export type SpatialValidationResult = WholeRoomValidationReport;
 
 /** AREA_RUG is a floor layer under furniture; two rugs still compete for the same floor layer. */
 function occupancyLayer(item: AnyFurniturePlanItem): "AREA_RUG" | "FURNITURE" {
@@ -159,14 +160,18 @@ export function validateSpatialPlan(
   const validById = new Map(validItems.map((entry) => [entry.item.id, entry]));
   const reportedFunctionalIds = new Set<string>();
   const tableRule = seatingCoffeeTableClearanceRule;
+  let relationshipInputsComplete = true;
+  let hasApplicableRelationshipClearance = false;
   for (const { item, footprint } of validItems) {
     if (!("semanticPlacement" in item) || item.semanticPlacement.role !== tableRule.sourceRole) continue;
     for (const relationship of item.semanticPlacement.relationships) {
       if (relationship.type !== tableRule.relationshipType) continue;
       const target = validById.get(relationship.targetItemId);
-      if (!target || target.item.id === item.id || !("semanticPlacement" in target.item)) continue;
+      if (!target) { relationshipInputsComplete = false; continue; }
+      if (target.item.id === item.id || !("semanticPlacement" in target.item)) continue;
       const targetRole = target.item.semanticPlacement.role;
       if (!tableRule.targetRoles.some((role) => role === targetRole)) continue;
+      hasApplicableRelationshipClearance = true;
       const pairIds = [item.id, target.item.id];
       if (physicalOverlapIds.has(violationBase("FURNITURE_OVERLAP", pairIds).id)) continue;
       const measured = minimumPolygonDistance(footprint.polygon, target.footprint.polygon);
@@ -226,8 +231,12 @@ export function validateSpatialPlan(
       },
     });
   }
-  violations.sort((first, second) => first.id < second.id ? -1 : first.id > second.id ? 1 : 0);
-  const physicallyValid = !violations.some((violation) => violation.priority === "P0" && violation.classification === "hard");
-  const functionallyValid = !violations.some((violation) => violation.priority === "P1" && violation.classification === "hard");
-  return { valid: physicallyValid && functionallyValid, physicallyValid, functionallyValid, violations, circulation };
+  const completeFootprints = !violations.some((violation) => violation.type === "INVALID_FOOTPRINT");
+  return buildWholeRoomValidationReport(violations, circulation, {
+    footprintsEvaluated: true,
+    physicalEvaluated: completeFootprints,
+    physicalDoorConflictEvaluated: completeFootprints && doors.size > 0,
+    functionalClearanceEvaluated: completeFootprints && relationshipInputsComplete && (doors.size > 0 || hasApplicableRelationshipClearance),
+    circulationEvaluated: circulation.status !== "NOT_EVALUATED",
+  });
 }
