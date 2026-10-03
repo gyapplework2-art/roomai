@@ -269,14 +269,14 @@ test("repair comparator is lexicographic with physical correctness first", () =>
   assert.equal(compareRepairScores(score, { ...score }), 0);
 });
 
-test("P0 repair stops at zero and leaves unrelated P1 for later repair milestones", () => {
+test("P0-only compatibility mode stops at zero and leaves unrelated P1 untouched", () => {
   const primary = item("seat", 200, 100, 100, 100);
   primary.semanticPlacement.role = "PRIMARY_SEATING";
   const table = item("table", 200, 170, 100, 40);
   table.semanticPlacement.role = "COFFEE_TABLE";
   table.semanticPlacement.relationships = [{ type: "IN_FRONT_OF", targetItemId: primary.id }];
   const source = plan([item("outside", 20, 100, 80, 40), primary, table]);
-  const result = repairSpatialPlan(source, room, [door], zones);
+  const result = repairSpatialPlan(source, room, [door], zones, { functionalRepairs: false });
   assert.equal(result.originalReport.summary.p1Count, 1);
   assert.equal(result.originalReport.circulation.status, "PASS");
   assert.equal(result.status, "PARTIALLY_REPAIRED");
@@ -288,9 +288,9 @@ test("P0 repair stops at zero and leaves unrelated P1 for later repair milestone
   assert.deepEqual(result.repairedPlan.items[2], table);
 });
 
-test("P1-only and incomplete-but-physically-clean plans are not labeled repaired", () => {
+test("P0-only compatibility mode leaves P1-only and incomplete plans unrepaired", () => {
   const approach = plan([item("approach", 400, 50, 40, 20)]);
-  const local = repairSpatialPlan(approach, room, [door], zones);
+  const local = repairSpatialPlan(approach, room, [door], zones, { functionalRepairs: false });
   assert.equal(local.originalReport.summary.p0Count, 0);
   assert.equal(local.originalReport.summary.p1Count, 1);
   assert.equal(local.status, "NOT_REPAIRABLE");
@@ -654,13 +654,13 @@ test("real A.2.3 coordinated repair improves where A.4.1 could not, without movi
   assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
 });
 
-test("IN_FRONT_OF P0 repair can leave functional clearance invalid and must stop rather than target P1", () => {
+test("P0-only compatibility mode can leave IN_FRONT_OF functional clearance invalid", () => {
   const anchor = relationshipFixture().items[0];
   const table = item("rotated-table", 250, 70, 100, 60);
   table.placement.preferredOrientationDegrees = 37;
   table.semanticPlacement.role = "COFFEE_TABLE";
   table.semanticPlacement.relationships = [{ type: "IN_FRONT_OF", targetItemId: anchor.id }];
-  const result = repairSpatialPlan(plan([anchor, table]), room, [topDoor], zones, { limits: { maxCandidatesPerIteration: 1, maxTotalCandidateEvaluations: 1 } });
+  const result = repairSpatialPlan(plan([anchor, table]), room, [topDoor], zones, { functionalRepairs: false, limits: { maxCandidatesPerIteration: 1, maxTotalCandidateEvaluations: 1 } });
   assert.equal(result.status, "PARTIALLY_REPAIRED");
   assert.equal(result.finalReport.summary.p0Count, 0);
   assert.equal(result.finalReport.summary.p1Count, 1);

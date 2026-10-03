@@ -7,16 +7,19 @@ import type { WholeRoomValidationReport } from "./spatial-validation-report";
 import type { AnyFurniturePlan, AnyFurniturePlanItem, FurniturePlanItemV1 } from "./types";
 import { deriveFunctionalZones, type FunctionalZone } from "./zones";
 import { buildRepairRelationshipView, completeRelationshipChanges, generateRelationshipRepairCandidates, type RelationshipChange, type RelationshipCandidate } from "./repair-relationships";
+import { generateFunctionalRepairCandidates, isSupportedFunctionalViolation, type FunctionalRepairViolation } from "./repair-functional";
 
 export const SPATIAL_REPAIR_LIMITS = { maxIterations: 8, maxCandidatesPerIteration: 40, maxTotalCandidateEvaluations: 200 } as const;
 export const LOCAL_REPAIR_DISTANCES_CM = [10, 20, 30, 45, 60] as const;
 export type RepairLimits = { maxIterations: number; maxCandidatesPerIteration: number; maxTotalCandidateEvaluations: number };
 export type RepairScore = { hardP0: number; hardP1: number; totalHard: number; totalViolations: number };
-type RepairableViolation = Extract<SpatialViolation, { type: "FURNITURE_OVERLAP" | "OUTSIDE_ROOM" }>;
+type RepairableViolation = Extract<SpatialViolation, { type: "FURNITURE_OVERLAP" | "OUTSIDE_ROOM" }> | FunctionalRepairViolation;
 type Offset = { dxCm: number; dyCm: number };
 type WallConstraint = { tangent: Point; start: Point; lengthCm: number };
 export type SpatialRepairAttempt = {
-  strategy: "LOCAL_TRANSLATION" | RelationshipCandidate["strategy"];
+  phase: "PHYSICAL" | "FUNCTIONAL";
+  strategy: "LOCAL_TRANSLATION" | RelationshipCandidate["strategy"] | "FUNCTIONAL_CLEARANCE" | "DOOR_APPROACH" | "CIRCULATION";
+  functionalContext: FunctionalRepairViolation["details"] | null;
   changedItemIds: string[];
   relationshipContext: RelationshipCandidate["context"];
   movements: Array<{ itemId: string; offset: Offset; orientationChange: { before: number | null; after: number | null } | null }>;
@@ -29,7 +32,7 @@ export type SpatialRepairAttempt = {
   movementDistanceCm: number;
   offset: Offset;
   accepted: boolean;
-  reason: "ACCEPTED" | "NO_P0_IMPROVEMENT" | "CENTER_OUTSIDE_ROOM" | "WALL_SPAN_CONSTRAINT" | "NOT_SELECTED";
+  reason: "ACCEPTED" | "NO_P0_IMPROVEMENT" | "NO_P1_IMPROVEMENT" | "INTRODUCES_P0" | "CENTER_OUTSIDE_ROOM" | "WALL_SPAN_CONSTRAINT" | "NOT_SELECTED";
   before: RepairScore;
   after: RepairScore;
 };
@@ -44,7 +47,7 @@ export type SpatialRepairResult<Plan extends AnyFurniturePlan = AnyFurniturePlan
   changedItemIds: string[];
   limits: RepairLimits;
   diagnostics: {
-    terminationReason: "ALREADY_VALID" | "NO_REPAIRABLE_P0" | "NO_MOVABLE_TARGET" | "NO_STRICT_IMPROVEMENT" | "PHYSICAL_FAILURES_RESOLVED" | "MAX_ITERATIONS" | "MAX_CANDIDATES_PER_ITERATION" | "MAX_TOTAL_CANDIDATE_EVALUATIONS";
+    terminationReason: "ALREADY_VALID" | "NO_REPAIRABLE_P0" | "NO_REPAIRABLE_P1" | "NO_MOVABLE_TARGET" | "NO_STRICT_IMPROVEMENT" | "PHYSICAL_FAILURES_RESOLVED" | "ALL_HARD_FAILURES_RESOLVED" | "MAX_ITERATIONS" | "MAX_CANDIDATES_PER_ITERATION" | "MAX_TOTAL_CANDIDATE_EVALUATIONS";
     iterationsCompleted: number;
     totalCandidateEvaluations: number;
     exhaustedLimits: Array<keyof RepairLimits>;
@@ -52,7 +55,7 @@ export type SpatialRepairResult<Plan extends AnyFurniturePlan = AnyFurniturePlan
   };
 };
 
-export type SpatialRepairOptions = { report?: WholeRoomValidationReport; limits?: Partial<RepairLimits>; relationshipRepairs?: boolean };
+export type SpatialRepairOptions = { report?: WholeRoomValidationReport; limits?: Partial<RepairLimits>; relationshipRepairs?: boolean; functionalRepairs?: boolean };
 
 export function getRepairScore(report: WholeRoomValidationReport): RepairScore {
   return {
@@ -160,7 +163,8 @@ function localDirections(position: Point, preferred: Point | undefined, tangent:
 
 /** Positional relationships use coordinated then single candidates; ordinary local movement remains unchanged.
  * Existing FACES alone permits orientation updates; every complete candidate is certified only by A.3.
- * relationshipRepairs:false is the A.4.1 compatibility mode, not a separate engine.
+ * relationshipRepairs:false and functionalRepairs:false retain previous-slice compatibility.
+ * Functional repair starts only at zero hard P0 and consumes the same shared budget.
  */
 export function repairSpatialPlan<Plan extends AnyFurniturePlan>(
   plan: Plan,
@@ -188,43 +192,76 @@ export function repairSpatialPlan<Plan extends AnyFurniturePlan>(
   if (originalReport.status !== "VALID") {
     terminationReason = "MAX_ITERATIONS";
     for (let iteration = 1; iteration <= limits.maxIterations; iteration += 1) {
-      if (getRepairScore(currentReport).hardP0 === 0) { terminationReason = acceptedCount > 0 ? "PHYSICAL_FAILURES_RESOLVED" : "NO_REPAIRABLE_P0"; break; }
+      const phase = getRepairScore(currentReport).hardP0 > 0 ? "PHYSICAL" : "FUNCTIONAL";
+      if (phase === "FUNCTIONAL" && (options.functionalRepairs === false || getRepairScore(currentReport).hardP1 === 0)) {
+        terminationReason = acceptedCount > 0 ? "PHYSICAL_FAILURES_RESOLVED" : "NO_REPAIRABLE_P0";
+        break;
+      }
       if (attempts.length >= limits.maxTotalCandidateEvaluations) { exhausted.add("maxTotalCandidateEvaluations"); terminationReason = "MAX_TOTAL_CANDIDATE_EVALUATIONS"; break; }
-      if (!currentReport.violations.some((violation) => violation.type === "OUTSIDE_ROOM" || violation.type === "FURNITURE_OVERLAP")) {
+      if (phase === "PHYSICAL" && !currentReport.violations.some((violation) => violation.type === "OUTSIDE_ROOM" || violation.type === "FURNITURE_OVERLAP")) {
         terminationReason = "NO_REPAIRABLE_P0";
         break;
       }
-      const target = selectTarget(currentPlan, currentReport, geometry);
-      if (!target) { terminationReason = "NO_MOVABLE_TARGET"; break; }
-      const position = target.item.placement.approximatePosition;
-      if (!position) break;
-      const otherPosition = target.other?.placement.approximatePosition;
-      const preferred = target.violation.type === "OUTSIDE_ROOM" ? interiorReference : otherPosition ? {
-        xCm: position.xCm * 2 - otherPosition.xCm, yCm: position.yCm * 2 - otherPosition.yCm,
-      } : undefined;
-      const relationshipView = options.relationshipRepairs === false ? null : buildRepairRelationshipView(currentPlan);
-      const relationshipNode = relationshipView?.nodes.find((node) => node.itemId === target.item.id);
-      const semantic = "semanticPlacement" in target.item ? target.item.semanticPlacement : null;
-      const hasPositionalIntent = semantic && !target.wall && semantic.relationships.some((relationship) => relationship.type === "IN_FRONT_OF" || relationship.type === "ADJACENT_TO");
-      const candidates: Array<{ strategy: SpatialRepairAttempt["strategy"]; distance: number; offset: Offset; changes: RelationshipChange[]; context: RelationshipCandidate["context"] }> = [];
-      if (options.relationshipRepairs !== false && hasPositionalIntent) {
-        for (const candidate of generateRelationshipRepairCandidates(currentPlan, target.item.id, geometry)) {
-          const change = candidate.changes.find((member) => member.itemId === target.item.id);
-          if (!change) continue;
-          const offset = { dxCm: change.position.xCm - position.xCm, dyCm: change.position.yCm - position.yCm };
-          candidates.push({ ...candidate, distance: Math.hypot(offset.dxCm, offset.dyCm), offset });
-        }
-      } else if (options.relationshipRepairs === false || !semantic?.relationships.length || relationshipNode?.status === "READY") {
-        for (const distance of LOCAL_REPAIR_DISTANCES_CM) for (const direction of localDirections(position, preferred, target.wall?.tangent ?? null)) {
-          const offset = { dxCm: direction.xCm * distance, dyCm: direction.yCm * distance };
-          const seed = { itemId: target.item.id, position: { xCm: position.xCm + offset.dxCm, yCm: position.yCm + offset.dyCm }, orientationDegrees: target.item.placement.preferredOrientationDegrees };
-          const changes = options.relationshipRepairs === false ? [seed] : completeRelationshipChanges(currentPlan, [seed], geometry);
-          if (!changes) continue;
-          const context = changes.flatMap((change) => {
-            const node = relationshipView?.nodes.find((member) => member.itemId === change.itemId);
-            return [node?.positional, node?.faces].flatMap((relationship) => relationship ? [{ itemId: change.itemId, type: relationship.type, targetItemId: relationship.targetItemId }] : []);
+      const target = phase === "PHYSICAL" ? selectTarget(currentPlan, currentReport, geometry) : null;
+      if (phase === "PHYSICAL" && !target) { terminationReason = "NO_MOVABLE_TARGET"; break; }
+      let functionalViolation: FunctionalRepairViolation | undefined;
+      let functionalCandidates: ReturnType<typeof generateFunctionalRepairCandidates> = [];
+      if (phase === "FUNCTIONAL") {
+        for (const violation of currentReport.violations.filter(isSupportedFunctionalViolation)) {
+          const generated = generateFunctionalRepairCandidates(currentPlan, geometry, zones, currentReport, violation, (item, preferred) => {
+            const wall = wallConstraint(item, geometry);
+            const position = item.placement.approximatePosition;
+            if (!position || wall === "PROTECTED") return [];
+            return localDirections(position, preferred, wall?.tangent ?? null);
           });
-          candidates.push({ strategy: changes.length > 1 ? "RELATIONSHIP_COORDINATED" : context.length ? "RELATIONSHIP_SINGLE" : "LOCAL_TRANSLATION", distance, offset, changes, context });
+          if (generated.length > 0) {
+            functionalViolation = violation;
+            functionalCandidates = generated;
+            break;
+          }
+        }
+      }
+      if (phase === "FUNCTIONAL" && !functionalViolation) { terminationReason = "NO_REPAIRABLE_P1"; break; }
+      const selectedViolation = target?.violation ?? functionalViolation;
+      if (!selectedViolation) break;
+      const candidates: Array<{ itemId: string; strategy: SpatialRepairAttempt["strategy"]; distance: number; offset: Offset; changes: RelationshipChange[]; context: RelationshipCandidate["context"]; functionalContext: SpatialRepairAttempt["functionalContext"] }> = [];
+      if (target && target.item.placement.approximatePosition) {
+        const position = target.item.placement.approximatePosition;
+        const otherPosition = target.other?.placement.approximatePosition;
+        const preferred = target.violation.type === "OUTSIDE_ROOM" ? interiorReference : otherPosition ? {
+          xCm: position.xCm * 2 - otherPosition.xCm, yCm: position.yCm * 2 - otherPosition.yCm,
+        } : undefined;
+        const relationshipView = options.relationshipRepairs === false ? null : buildRepairRelationshipView(currentPlan);
+        const relationshipNode = relationshipView?.nodes.find((node) => node.itemId === target.item.id);
+        const semantic = "semanticPlacement" in target.item ? target.item.semanticPlacement : null;
+        const hasPositionalIntent = semantic && !target.wall && semantic.relationships.some((relationship) => relationship.type === "IN_FRONT_OF" || relationship.type === "ADJACENT_TO");
+        if (options.relationshipRepairs !== false && hasPositionalIntent) {
+          for (const candidate of generateRelationshipRepairCandidates(currentPlan, target.item.id, geometry)) {
+            const change = candidate.changes.find((member) => member.itemId === target.item.id);
+            if (!change) continue;
+            const offset = { dxCm: change.position.xCm - position.xCm, dyCm: change.position.yCm - position.yCm };
+            candidates.push({ ...candidate, itemId: target.item.id, functionalContext: null, distance: Math.hypot(offset.dxCm, offset.dyCm), offset });
+          }
+        } else if (options.relationshipRepairs === false || !semantic?.relationships.length || relationshipNode?.status === "READY") {
+          for (const distance of LOCAL_REPAIR_DISTANCES_CM) for (const direction of localDirections(position, preferred, target.wall?.tangent ?? null)) {
+            const offset = { dxCm: direction.xCm * distance, dyCm: direction.yCm * distance };
+            const seed = { itemId: target.item.id, position: { xCm: position.xCm + offset.dxCm, yCm: position.yCm + offset.dyCm }, orientationDegrees: target.item.placement.preferredOrientationDegrees };
+            const changes = options.relationshipRepairs === false ? [seed] : completeRelationshipChanges(currentPlan, [seed], geometry);
+            if (!changes) continue;
+            const context = changes.flatMap((change) => {
+              const node = relationshipView?.nodes.find((member) => member.itemId === change.itemId);
+              return [node?.positional, node?.faces].flatMap((relationship) => relationship ? [{ itemId: change.itemId, type: relationship.type, targetItemId: relationship.targetItemId }] : []);
+            });
+            candidates.push({ itemId: target.item.id, functionalContext: null, strategy: changes.length > 1 ? "RELATIONSHIP_COORDINATED" : context.length ? "RELATIONSHIP_SINGLE" : "LOCAL_TRANSLATION", distance, offset, changes, context });
+          }
+        }
+      } else if (functionalViolation) {
+        for (const candidate of functionalCandidates) {
+          const originalPosition = currentPlan.items.find((item) => item.id === candidate.itemId)?.placement.approximatePosition;
+          const changedPosition = candidate.changes.find((change) => change.itemId === candidate.itemId)?.position;
+          if (!originalPosition || !changedPosition) continue;
+          const offset = { dxCm: changedPosition.xCm - originalPosition.xCm, dyCm: changedPosition.yCm - originalPosition.yCm };
+          candidates.push({ ...candidate, offset, distance: Math.hypot(offset.dxCm, offset.dyCm) });
         }
       }
       const before = getRepairScore(currentReport);
@@ -261,14 +298,16 @@ export function repairSpatialPlan<Plan extends AnyFurniturePlan>(
           return wallDistance >= -GEOMETRY_EPSILON && wallDistance <= wall.lengthCm + GEOMETRY_EPSILON;
         });
         const admissible = centerInside && wallSpanAllowed;
-        const improving = after.hardP0 < before.hardP0 && compareRepairScores(after, before) < 0;
+        const improving = (phase === "PHYSICAL" ? after.hardP0 < before.hardP0 : after.hardP0 === 0 && after.hardP1 < before.hardP1)
+          && compareRepairScores(after, before) < 0;
         const attempt: SpatialRepairAttempt = {
-          strategy: candidate.strategy, changedItemIds: movements.map((movement) => movement.itemId).sort(),
+          phase, strategy: candidate.strategy, functionalContext: candidate.functionalContext, changedItemIds: movements.map((movement) => movement.itemId).sort(),
           relationshipContext: candidate.context, movements,
           movementCostCm: movements.reduce((sum, movement) => sum + Math.hypot(movement.offset.dxCm, movement.offset.dyCm), 0),
-          iteration, violationId: target.violation.id, violationType: target.violation.type,
-          itemId: target.item.id, candidateIndex: index + 1, movementDistanceCm: candidate.distance, offset: candidate.offset,
-          accepted: false, reason: !centerInside ? "CENTER_OUTSIDE_ROOM" : !wallSpanAllowed ? "WALL_SPAN_CONSTRAINT" : !improving ? "NO_P0_IMPROVEMENT" : "NOT_SELECTED", before, after,
+          iteration, violationId: selectedViolation.id, violationType: selectedViolation.type,
+          itemId: candidate.itemId, candidateIndex: index + 1, movementDistanceCm: candidate.distance, offset: candidate.offset,
+          accepted: false, reason: !centerInside ? "CENTER_OUTSIDE_ROOM" : !wallSpanAllowed ? "WALL_SPAN_CONSTRAINT"
+            : !improving ? phase === "PHYSICAL" ? "NO_P0_IMPROVEMENT" : after.hardP0 > 0 ? "INTRODUCES_P0" : "NO_P1_IMPROVEMENT" : "NOT_SELECTED", before, after,
         };
         attempts.push(attempt);
         if (!admissible || !improving) continue;
@@ -289,7 +328,11 @@ export function repairSpatialPlan<Plan extends AnyFurniturePlan>(
       currentReport = best.report;
       for (const id of best.attempt.changedItemIds) changed.add(id);
       acceptedCount += 1;
-      if (getRepairScore(currentReport).hardP0 === 0) { terminationReason = "PHYSICAL_FAILURES_RESOLVED"; break; }
+      const score = getRepairScore(currentReport);
+      if (score.hardP0 === 0 && (options.functionalRepairs === false || score.hardP1 === 0)) {
+        terminationReason = options.functionalRepairs === false ? "PHYSICAL_FAILURES_RESOLVED" : "ALL_HARD_FAILURES_RESOLVED";
+        break;
+      }
       if (iteration === limits.maxIterations) exhausted.add("maxIterations");
     }
   }
