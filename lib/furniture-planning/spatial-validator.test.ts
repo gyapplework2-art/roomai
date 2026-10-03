@@ -10,9 +10,15 @@ import { createFurnitureFootprint } from "./footprints";
 import { resolveLivingRoomComposition } from "./role-plan";
 import { validateSpatialPlan } from "./spatial-validator";
 import type { FurniturePlanItem, FurniturePlan, FurniturePlanItemV11 } from "./types";
-import { doorApproachClearanceRule, seatingCoffeeTableClearanceRule } from "./clearance-rules";
+import { doorApproachClearanceRule, seatingCoffeeTableClearanceRule, NORMAL_CIRCULATION_PROFILE } from "./clearance-rules";
+import type { CirculationEvaluation } from "./circulation";
 
 const room = createRectangleGeometry(500, 400, 250);
+const unavailableCirculation: CirculationEvaluation = {
+  status: "NOT_EVALUATED", reason: "NO_DOORS", profileId: NORMAL_CIRCULATION_PROFILE.id,
+  minimumPassageWidthCm: 75, targetZoneId: null, evaluatedDoorIds: [], successfulDoorIds: [],
+  excludedDoors: [], doors: [], gridNodeCount: 0, targetCandidateCount: 0,
+};
 
 function item(id: string, xCm = 200, yCm = 200, widthCm = 100, depthCm = 100, orientation = 0): FurniturePlanItem {
   return {
@@ -35,7 +41,7 @@ test("a valid whole-room arrangement is unchanged and has no violations", () => 
   const source = plan([item("a", 100, 100), item("b", 300, 200, 80, 40, 30)]);
   const snapshot = structuredClone(source);
   const geometrySnapshot = structuredClone(room);
-  assert.deepEqual(validateSpatialPlan(source, room), { valid: true, physicallyValid: true, functionallyValid: true, violations: [] });
+  assert.deepEqual(validateSpatialPlan(source, room), { valid: true, physicallyValid: true, functionallyValid: true, violations: [], circulation: unavailableCirculation });
   assert.deepEqual(source, snapshot);
   assert.deepEqual(room, geometrySnapshot);
 });
@@ -252,7 +258,7 @@ test("explicit AREA_RUG role controls floor layering rather than broad category 
     semanticPlacement: { role: "AREA_RUG", mode: "FLOATING", alignment: null, zoneId: null, targetWallId: null, relationships: [], fallbackModes: [] },
   };
   const furniture: FurniturePlanItemV11 = { ...rug, id: "seating", category: "rug", semanticPlacement: { ...rug.semanticPlacement, role: "PRIMARY_SEATING" } };
-  assert.deepEqual(validateSpatialPlan({ schemaVersion: "1.1", roomIntent: "Layering", items: [rug, furniture], notes: [] }, room), { valid: true, physicallyValid: true, functionallyValid: true, violations: [] });
+  assert.deepEqual(validateSpatialPlan({ schemaVersion: "1.1", roomIntent: "Layering", items: [rug, furniture], notes: [] }, room), { valid: true, physicallyValid: true, functionallyValid: true, violations: [], circulation: unavailableCirculation });
 });
 
 test("invalid authoritative geometry and malformed doors are rejected as validation preconditions", () => {
@@ -326,6 +332,7 @@ for (const gap of [40, 35, 100]) {
   test(`explicit seating/coffee-table boundary gap ${gap} cm passes minimum-only validation`, () => {
     assert.deepEqual(validateSpatialPlan(functionalPlan(relatedTableItems(gap)), room), {
       valid: true, physicallyValid: true, functionallyValid: true, violations: [],
+      circulation: unavailableCirculation,
     });
   });
 }

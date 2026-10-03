@@ -5,7 +5,9 @@ import { roomOpeningSchema } from "@/lib/geometry/schema";
 import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
 import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
 import { createFurnitureFootprint, type FootprintIssue, type FurnitureFootprint } from "./footprints";
-import { doorApproachClearanceRule, seatingCoffeeTableClearanceRule } from "./clearance-rules";
+import { doorApproachClearanceRule, seatingCoffeeTableClearanceRule, NORMAL_CIRCULATION_PROFILE } from "./clearance-rules";
+import { evaluateCirculation, type CirculationEvaluation } from "./circulation";
+import type { FunctionalZone } from "./zones";
 import type { AnyFurniturePlan, AnyFurniturePlanItem } from "./types";
 
 type Violation<Type extends string, Details, Priority extends "P0" | "P1" = "P0"> = {
@@ -30,10 +32,11 @@ export type SpatialViolation =
   } & (
     { context: "SEATING_COFFEE_TABLE"; relationship: { type: "IN_FRONT_OF"; sourceItemId: string; targetItemId: string } }
     | { context: "DOOR_APPROACH"; openingId: string | null; wallSegmentId: string; approachPolygon: Rectangle }
-  ), "P1">;
+  ), "P1">
+  | Violation<"BLOCKED_CIRCULATION", { profileId: string; targetZoneId: string; minimumPassageWidthCm: number; evaluatedDoorIds: string[] }, "P1">;
 
 /** Physical validity excludes hard P0; functional validity excludes hard P1; overall validity requires both. */
-export type SpatialValidationResult = { valid: boolean; physicallyValid: boolean; functionallyValid: boolean; violations: SpatialViolation[] };
+export type SpatialValidationResult = { valid: boolean; physicallyValid: boolean; functionallyValid: boolean; violations: SpatialViolation[]; circulation: CirculationEvaluation };
 
 /** AREA_RUG is a floor layer under furniture; two rugs still compete for the same floor layer. */
 function occupancyLayer(item: AnyFurniturePlanItem): "AREA_RUG" | "FURNITURE" {
@@ -63,9 +66,10 @@ export function validateSpatialPlan(
   plan: AnyFurniturePlan,
   geometry: RoomGeometry,
   openings: readonly RoomOpening[] = [],
+  zones: readonly FunctionalZone[] = [],
 ): SpatialValidationResult {
   if (!validateRoomGeometryStructure(geometry).valid) throw new Error("SPATIAL_GEOMETRY_INVALID");
-  const doors = new Map<string, { opening: RoomOpening; span: { start: Point; end: Point }; approach: Rectangle }>();
+  const doors = new Map<string, { opening: RoomOpening; span: { start: Point; end: Point }; approach: Rectangle; circulationStart: Point }>();
   for (const opening of openings) {
     if (opening.openingType !== "door") continue;
     const parsed = roomOpeningSchema.safeParse(opening);
@@ -82,12 +86,17 @@ export function validateSpatialPlan(
     const center = { xCm: midpoint.xCm + inward.xCm * depth / 2, yCm: midpoint.yCm + inward.yCm * depth / 2 };
     const approach = createOrientedRectangle(center, width, depth, Math.atan2(deltaY, deltaX) * 180 / Math.PI);
     const key = JSON.stringify([parsed.data.id ?? null, parsed.data.wallSegmentId, parsed.data.offsetCm, parsed.data.widthCm]);
-    doors.set(key, { opening: parsed.data, span, approach });
+    const radius = NORMAL_CIRCULATION_PROFILE.minimumPassageWidthCm / 2;
+    doors.set(key, { opening: parsed.data, span, approach, circulationStart: {
+      xCm: midpoint.xCm + inward.xCm * radius, yCm: midpoint.yCm + inward.yCm * radius,
+    } });
   }
 
   const violations: SpatialViolation[] = [];
   const physicalOverlapIds = new Set<string>();
   const physicalDoorIds = new Set<string>();
+  const physicallyBlockedDoors = new Set<string>();
+  const approachBlockedDoors = new Set<string>();
   const counts = new Map<string, number>();
   for (const item of plan.items) counts.set(item.id, (counts.get(item.id) ?? 0) + 1);
   for (const [id, duplicateCount] of counts) {
@@ -121,6 +130,7 @@ export function validateSpatialPlan(
       if (segmentIntersectsPolygon(span.start, span.end, footprint.polygon)) {
         const base = violationBase("DOOR_CONFLICT", [item.id], key);
         physicalDoorIds.add(base.id);
+        physicallyBlockedDoors.add(key);
         violations.push({
           ...base,
           message: "Furniture intersects the physical doorway span.",
@@ -182,6 +192,7 @@ export function validateSpatialPlan(
     for (const [key, { opening, span, approach }] of doors) {
       if (physicalDoorIds.has(violationBase("DOOR_CONFLICT", [item.id], key).id)
         || !rectanglesOverlapWithPositiveArea(footprint.corners, approach)) continue;
+      approachBlockedDoors.add(key);
       violations.push({
         ...violationBase("INSUFFICIENT_FUNCTIONAL_CLEARANCE", [item.id], JSON.stringify([doorRule.id, key])),
         priority: doorRule.priority, classification: doorRule.classification,
@@ -194,8 +205,29 @@ export function validateSpatialPlan(
       });
     }
   }
+  const circulation = evaluateCirculation(
+    geometry, zones,
+    validItems.filter(({ item }) => occupancyLayer(item) !== "AREA_RUG").map(({ footprint }) => footprint),
+    [...doors].map(([id, door]) => ({
+      id, start: door.circulationStart,
+      excludedReason: physicallyBlockedDoors.has(id) ? "PHYSICAL_DOOR_CONFLICT"
+        : approachBlockedDoors.has(id) ? "DOOR_APPROACH_OBSTRUCTION" : null,
+    })),
+    violations.filter((violation) => violation.type === "INVALID_FOOTPRINT").flatMap((violation) => violation.itemIds),
+  );
+  if (circulation.status === "BLOCKED" && circulation.targetZoneId !== null) {
+    violations.push({
+      ...violationBase("BLOCKED_CIRCULATION", [], JSON.stringify([circulation.profileId, circulation.targetZoneId, circulation.evaluatedDoorIds])),
+      priority: NORMAL_CIRCULATION_PROFILE.priority,
+      message: "No usable door reaches the primary seating access area under the bounded RoomAI normal-use circulation approximation; not accessibility or egress certification.",
+      details: {
+        profileId: circulation.profileId, targetZoneId: circulation.targetZoneId,
+        minimumPassageWidthCm: circulation.minimumPassageWidthCm, evaluatedDoorIds: circulation.evaluatedDoorIds,
+      },
+    });
+  }
   violations.sort((first, second) => first.id < second.id ? -1 : first.id > second.id ? 1 : 0);
   const physicallyValid = !violations.some((violation) => violation.priority === "P0" && violation.classification === "hard");
   const functionallyValid = !violations.some((violation) => violation.priority === "P1" && violation.classification === "hard");
-  return { valid: physicallyValid && functionallyValid, physicallyValid, functionallyValid, violations };
+  return { valid: physicallyValid && functionallyValid, physicallyValid, functionallyValid, violations, circulation };
 }

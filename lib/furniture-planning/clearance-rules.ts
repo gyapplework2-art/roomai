@@ -31,3 +31,15 @@ export const doorApproachClearanceRule = {
   classification: "hard",
   regulatoryGuarantee: false,
 } as const satisfies ClearanceRule;
+
+/** Bounded normal-use approximation, not accessibility/code/egress certification. */
+export const NORMAL_CIRCULATION_PROFILE = {
+  id: "normal-room-circulation-v1",
+  minimumPassageWidthCm: 75,
+  gridResolutionCm: 10,
+  maximumGridNodes: 25000,
+  targetSearchRadiusCm: 75,
+  priority: "P1",
+  classification: "hard",
+  regulatoryGuarantee: false,
+} as const;

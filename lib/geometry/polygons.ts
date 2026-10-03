@@ -151,9 +151,27 @@ export function minimumPolygonDistance(first: readonly Point[], second: readonly
 export function minimumSegmentPolygonDistance(start: Point, end: Point, polygon: readonly Point[]): number {
   if (polygon.length < 3) throw new Error("POLYGON_DISTANCE_INVALID");
   if (segmentIntersectsPolygon(start, end, polygon)) return 0;
+  return minimumSegmentPolygonBoundaryDistance(start, end, polygon);
+}
+
+export function pointPolygonBoundaryDistance(point: Point, polygon: readonly Point[]): number {
+  if (polygon.length < 3) throw new Error("POLYGON_DISTANCE_INVALID");
+  return Math.min(...polygon.map((start, index) => pointSegmentDistance(point, start, polygon[(index + 1) % polygon.length])));
+}
+
+export function pointPolygonDistance(point: Point, polygon: readonly Point[]): number {
+  return isPointInsideOrOnPolygon(point, polygon) ? 0 : pointPolygonBoundaryDistance(point, polygon);
+}
+
+export function minimumSegmentPolygonBoundaryDistance(start: Point, end: Point, polygon: readonly Point[]): number {
+  if (polygon.length < 3) throw new Error("POLYGON_DISTANCE_INVALID");
   let minimum = Infinity;
   polygon.forEach((vertex, index) => {
     const next = polygon[(index + 1) % polygon.length];
+    if (segmentsIntersect(start, end, vertex, next)) {
+      minimum = 0;
+      return;
+    }
     minimum = Math.min(minimum, pointSegmentDistance(start, vertex, next),
       pointSegmentDistance(end, vertex, next), pointSegmentDistance(vertex, start, end));
   });
