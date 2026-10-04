@@ -234,6 +234,103 @@ export const aestheticEvidenceObservationSchema = z.discriminatedUnion("kind", [
     if ((observation.reasons.includes("relationship_color_missing") || observation.reasons.includes("relationship_color_unknown")) && observation.compatibility !== "unknown") context.addIssue({ code: "custom", path: ["compatibility"], message: "Missing or unsupported colors remain unknown." });
   }),
   z.object({
+    kind: z.literal("item_material_harmony"),
+    itemId: identifier,
+    material: aestheticMaterialSchema.nullable(),
+    materialSource: z.enum(["catalog", "design_object", "normalized_attributes"]).nullable(),
+    preferenceRole: z.enum(["PREFERRED", "AVOIDED"]).nullable(),
+    relationship: z.enum(["IDENTICAL", "SIMILAR", "CONFLICTING", "UNKNOWN"]),
+    compatibility: designCompatibilitySchema,
+    reasons: z.array(z.enum([
+      "candidate_material_missing", "candidate_material_unknown", "design_material_intent_missing",
+      "candidate_matches_preferred_material", "candidate_matches_preferred_material_family",
+      "candidate_matches_avoided_material", "candidate_matches_avoided_material_family",
+      "candidate_material_valid_but_not_preferred",
+    ])).length(1),
+  }).strict().superRefine((observation, context) => {
+    if ((observation.material === null) !== (observation.materialSource === null)) context.addIssue({ code: "custom", path: ["materialSource"], message: "Material provenance must match material availability." });
+    const preferred = observation.reasons.some((reason) => reason.startsWith("candidate_matches_preferred_material"));
+    const avoided = observation.reasons.some((reason) => reason.startsWith("candidate_matches_avoided_material"));
+    const expectedRole = preferred ? "PREFERRED" : avoided ? "AVOIDED" : null;
+    const expectedRelationship = observation.reasons.includes("candidate_matches_preferred_material") ? "IDENTICAL"
+      : observation.reasons.includes("candidate_matches_preferred_material_family") ? "SIMILAR"
+        : avoided ? "CONFLICTING" : "UNKNOWN";
+    const expectedCompatibility = preferred ? "compatible" : avoided ? "incompatible"
+      : observation.reasons.includes("candidate_material_valid_but_not_preferred") ? "mixed" : "unknown";
+    if (observation.preferenceRole !== expectedRole || observation.relationship !== expectedRelationship) context.addIssue({ code: "custom", path: ["relationship"], message: "Material preference classification must preserve the existing evaluator result." });
+    if (observation.compatibility !== expectedCompatibility) context.addIssue({ code: "custom", path: ["compatibility"], message: "Material preference compatibility must preserve the existing evaluator result." });
+  }),
+  z.object({
+    kind: z.literal("pair_material_harmony"),
+    relationshipType: aestheticRelationshipTypeSchema,
+    pairItems: z.array(z.object({
+      itemId: identifier,
+      semanticRole: furnitureRoleSchema.nullable(),
+      material: aestheticMaterialSchema.nullable(),
+      materialSource: z.enum(["catalog", "design_object", "normalized_attributes"]).nullable(),
+      upholsteryType: z.enum(["fabric", "leather"]).nullable(),
+      upholsteryMaterial: aestheticMaterialSchema.refine((material) => material.family === "textile" || material.family === "leather", "Upholstery material must use an existing upholstery family.").nullable(),
+    }).strict()).length(2),
+    relationshipSources: z.array(z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("E10A_GROUP"), groupId: identifier }).strict(),
+      z.object({ kind: z.literal("SEMANTIC_RELATIONSHIP"), relationshipType: z.literal("GROUPED_WITH") }).strict(),
+    ])).min(1),
+    relationship: z.enum(["IDENTICAL", "SIMILAR", "UNKNOWN"]),
+    compatibility: designCompatibilitySchema,
+    reasons: z.array(z.enum([
+      "upholsteryType_match", "upholsteryType_different", "upholsteryType_unknown",
+      "upholsteryMaterial_match", "upholsteryMaterial_shared_material_family", "upholsteryMaterial_different", "upholsteryMaterial_unknown",
+      "material_pair_rule_unavailable",
+    ])).min(1),
+  }).strict().superRefine((observation, context) => {
+    const itemIds = observation.pairItems.map((item) => item.itemId);
+    if (new Set(itemIds).size !== itemIds.length || itemIds[0] > itemIds[1]) context.addIssue({ code: "custom", path: ["pairItems"], message: "Material pair members must be distinct and canonically ordered." });
+    if (observation.pairItems.some((item) => (item.material === null) !== (item.materialSource === null))) context.addIssue({ code: "custom", path: ["pairItems"], message: "Material provenance must match material availability." });
+    const sourceKeys = observation.relationshipSources.map((source) => source.kind === "E10A_GROUP" ? `${source.kind}:${source.groupId}` : source.kind);
+    if (new Set(sourceKeys).size !== sourceKeys.length || sourceKeys.some((key, index) => index > 0 && sourceKeys[index - 1] > key)) context.addIssue({ code: "custom", path: ["relationshipSources"], message: "Material relationship sources must be unique and canonically ordered." });
+    const expectedRelationship = observation.reasons.includes("upholsteryMaterial_match") ? "IDENTICAL"
+      : observation.reasons.includes("upholsteryMaterial_shared_material_family") ? "SIMILAR" : "UNKNOWN";
+    const expectedCompatibility = observation.reasons.includes("material_pair_rule_unavailable") ? "unknown"
+      : observation.reasons.some((reason) => reason.endsWith("_different")) ? "mixed"
+        : observation.reasons.some((reason) => reason.endsWith("_match") || reason === "upholsteryMaterial_shared_material_family") ? "compatible" : "unknown";
+    if (observation.relationship !== expectedRelationship || observation.compatibility !== expectedCompatibility) context.addIssue({ code: "custom", path: ["relationship"], message: "Pair material result must preserve the existing furniture-attribute comparison." });
+  }),
+  z.object({
+    kind: z.literal("pair_texture_harmony"),
+    relationshipType: aestheticRelationshipTypeSchema,
+    pairItems: z.array(z.object({
+      itemId: identifier,
+      semanticRole: furnitureRoleSchema.nullable(),
+      texture: z.string().trim().min(1).max(160).nullable(),
+      textureSource: z.literal("normalized_attributes").nullable(),
+    }).strict()).length(2),
+    relationshipSources: z.array(z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("E10A_GROUP"), groupId: identifier }).strict(),
+      z.object({ kind: z.literal("SEMANTIC_RELATIONSHIP"), relationshipType: z.literal("GROUPED_WITH") }).strict(),
+    ])).min(1),
+    relationship: z.enum(["IDENTICAL", "UNKNOWN"]),
+    compatibility: designCompatibilitySchema,
+    reasons: z.array(z.enum(["fabricTexture_match", "fabricTexture_different", "fabricTexture_unknown"])).length(1),
+  }).strict().superRefine((observation, context) => {
+    const itemIds = observation.pairItems.map((item) => item.itemId);
+    if (new Set(itemIds).size !== itemIds.length || itemIds[0] > itemIds[1]) context.addIssue({ code: "custom", path: ["pairItems"], message: "Texture pair members must be distinct and canonically ordered." });
+    if (observation.pairItems.some((item) => (item.texture === null) !== (item.textureSource === null))) context.addIssue({ code: "custom", path: ["pairItems"], message: "Texture provenance must match texture availability." });
+    for (const [index, item] of observation.pairItems.entries()) {
+      if (item.texture !== null) {
+        const first = { ...unknownAttributes, fabricTexture: item.texture };
+        if (evaluateFurnitureAttributeCompatibility(first, first).attributes.fabricTexture.compatibility === "unknown") {
+          context.addIssue({ code: "custom", path: ["pairItems", index, "texture"], message: "Texture must use the existing normalized fabric-texture vocabulary." });
+        }
+      }
+    }
+    const expectedRelationship = observation.reasons.includes("fabricTexture_match") ? "IDENTICAL" : "UNKNOWN";
+    const expectedCompatibility = observation.reasons.includes("fabricTexture_match") ? "compatible"
+      : observation.reasons.includes("fabricTexture_different") ? "mixed" : "unknown";
+    const sourceKeys = observation.relationshipSources.map((source) => source.kind === "E10A_GROUP" ? `${source.kind}:${source.groupId}` : source.kind);
+    if (observation.relationship !== expectedRelationship || observation.compatibility !== expectedCompatibility) context.addIssue({ code: "custom", path: ["relationship"], message: "Texture result must preserve the existing furniture-attribute comparison." });
+    if (new Set(sourceKeys).size !== sourceKeys.length || sourceKeys.some((key, index) => index > 0 && sourceKeys[index - 1] > key)) context.addIssue({ code: "custom", path: ["relationshipSources"], message: "Texture relationship sources must be unique and canonically ordered." });
+  }),
+  z.object({
     kind: z.literal("room_furniture_scale"),
     roomId: identifier,
     roomAreaCm2: z.number().finite().positive(),
@@ -363,6 +460,10 @@ const evidenceSchema = z.object({
     && evidence.source !== "normalized_attributes") {
     context.addIssue({ code: "custom", path: ["source"], message: "Normalized color evidence must use its normalized-attribute source." });
   }
+  if ((evidence.observation.kind === "item_material_harmony" || evidence.observation.kind === "pair_material_harmony" || evidence.observation.kind === "pair_texture_harmony")
+    && evidence.source !== "normalized_attributes") {
+    context.addIssue({ code: "custom", path: ["source"], message: "Material and texture observations must use their normalized-attribute evidence source." });
+  }
 });
 
 const missingInformationSchema = z.object({
@@ -417,6 +518,8 @@ export const aestheticFindingSchema = z.object({
     const evidenceItems = evidence.observation.kind === "design_intent" ? []
       : evidence.observation.kind === "item_color_harmony" ? [evidence.observation.itemId]
       : evidence.observation.kind === "pair_color_harmony" ? evidence.observation.pairItems.map((item) => item.itemId)
+      : evidence.observation.kind === "item_material_harmony" ? [evidence.observation.itemId]
+      : evidence.observation.kind === "pair_material_harmony" || evidence.observation.kind === "pair_texture_harmony" ? evidence.observation.pairItems.map((item) => item.itemId)
       : evidence.observation.kind === "room_furniture_scale" ? [evidence.observation.itemId]
       : evidence.observation.kind === "furniture_proportion" ? evidence.observation.pairItems.map((item) => item.itemId)
       : evidence.observation.kind === "measurement" || evidence.observation.kind === "normalized_attribute"
@@ -477,6 +580,46 @@ export const aestheticFindingSchema = z.object({
       }
       if (evidence.itemIds.length !== pairItemIds.length || pairItemIds.some((id) => !evidence.itemIds.includes(id))) {
         issue(["supportingEvidence"], "Pair color evidence must reference exactly both members.");
+      }
+    }
+    if (observation.kind === "item_material_harmony") {
+      if (finding.target.kind !== "dimension" || finding.target.dimension !== "material_harmony"
+        || finding.itemIds.length !== 1 || finding.itemIds[0] !== observation.itemId
+        || finding.compatibility !== observation.compatibility) {
+        issue(["supportingEvidence"], "Item material evidence must match a single-item material-harmony finding and preserve compatibility.");
+      }
+      const avoided = observation.preferenceRole === "AVOIDED";
+      const preferred = observation.preferenceRole === "PREFERRED";
+      if ((avoided && finding.impact !== "MINOR_ISSUE") || (preferred && finding.impact !== "POSITIVE")
+        || (!avoided && !preferred && finding.impact !== "NEUTRAL")) {
+        issue(["impact"], "Only explicit material preference alignment or avoidance can affect finding impact.");
+      }
+      if ((finding.compatibility === "unknown") !== (finding.coverage.status === "INSUFFICIENT_EVIDENCE")) {
+        issue(["coverage"], "Unknown item material results require insufficient-evidence coverage.");
+      }
+    }
+    if (observation.kind === "pair_material_harmony" || observation.kind === "pair_texture_harmony") {
+      const dimension = observation.kind === "pair_material_harmony" ? "material_harmony" : "texture_harmony";
+      const pairItemIds = observation.pairItems.map((item) => item.itemId);
+      if (finding.target.kind !== "relationship" || finding.target.relationshipType !== observation.relationshipType
+        || finding.target.dimension !== dimension || finding.compatibility !== observation.compatibility
+        || JSON.stringify(pairItemIds) !== JSON.stringify([...finding.itemIds].sort())) {
+        issue(["supportingEvidence"], "Pair material/texture evidence must match its relationship finding and preserve compatibility.");
+      }
+      if (evidence.itemIds.length !== pairItemIds.length || pairItemIds.some((id) => !evidence.itemIds.includes(id))) {
+        issue(["supportingEvidence"], "Pair material/texture evidence must reference exactly both members.");
+      }
+      if (finding.impact !== "NEUTRAL") issue(["impact"], "Pairwise attribute agreement alone does not establish a stronger design or a conflict.");
+      if (observation.kind === "pair_material_harmony" && observation.reasons.includes("material_pair_rule_unavailable")
+        && finding.coverage.status !== "NOT_EVALUATED") {
+        issue(["coverage"], "Unsupported general-material pairings must remain not evaluated.");
+      }
+      if (observation.kind === "pair_material_harmony" && !observation.reasons.includes("material_pair_rule_unavailable")
+        && finding.compatibility === "unknown" && finding.coverage.status !== "INSUFFICIENT_EVIDENCE") {
+        issue(["coverage"], "Missing upholstery evidence requires insufficient-evidence coverage.");
+      }
+      if (observation.kind === "pair_texture_harmony" && finding.compatibility === "unknown" && finding.coverage.status !== "INSUFFICIENT_EVIDENCE") {
+        issue(["coverage"], "Missing texture evidence requires insufficient-evidence coverage.");
       }
     }
   }
