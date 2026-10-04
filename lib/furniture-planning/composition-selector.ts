@@ -1,4 +1,4 @@
-import { getGeometryBounds } from "@/lib/geometry/dimensions";
+import { getGeometryBounds, getPolygonAreaCm2 } from "@/lib/geometry/dimensions";
 import type { RoomGeometry } from "@/lib/geometry/types";
 import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
 import { livingRoomCompositions, type CompositionTemplate, type CompositionTemplateId, type CompositionType } from "./compositions";
@@ -56,12 +56,7 @@ function preferredTemplate(input: CompositionSelectionInput): CompositionTemplat
   const bounds = getGeometryBounds(geometry);
   const shortSide = Math.min(bounds.widthCm, bounds.lengthCm);
   const longSide = Math.max(bounds.widthCm, bounds.lengthCm);
-  let twiceArea = 0;
-  geometry.vertices.forEach((vertex, index) => {
-    const next = geometry.vertices[(index + 1) % geometry.vertices.length];
-    twiceArea += vertex.xCm * next.yCm - next.xCm * vertex.yCm;
-  });
-  const area = Math.abs(twiceArea) / 2;
+  const area = getPolygonAreaCm2(geometry.vertices);
   const policy = compositionSelectionPolicy;
   if (area < policy.smallMaximumAreaCm2 || shortSide < policy.smallMaximumShortSideCm) return "T2";
   const functions = new Set(input.roomFunctions ?? []);

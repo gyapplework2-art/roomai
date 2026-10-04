@@ -63,6 +63,7 @@ export const aestheticGroupReferenceSchema = z.object({
 export const aestheticSpatialItemSchema = z.object({
   itemId: identifier,
   category: text,
+  subtype: text.nullable(),
   role: aestheticRoleSchema.nullable(),
   semanticRole: furnitureRoleSchema.nullable(),
   placement: z.object({
@@ -140,7 +141,7 @@ export const aestheticDesignContextSchema = z.object({
   spatialValidation: z.object({
     status: z.enum(["VALID", "INVALID", "NOT_FULLY_EVALUATED"]),
     valid: z.boolean(), physicallyValid: z.boolean(), functionallyValid: z.boolean(),
-    violationIds: z.array(identifier), circulationStatus: z.enum(["PASS", "BLOCKED", "NOT_EVALUATED"]),
+    violationIds: z.array(identifier), violatingItemIds: z.array(identifier), circulationStatus: z.enum(["PASS", "BLOCKED", "NOT_EVALUATED"]),
   }).strict(),
   metadataCoverage: z.array(aestheticMetadataCoverageSchema),
 }).strict().superRefine((context, validation) => {
@@ -257,7 +258,7 @@ function metadataForItem(item: FurniturePlanV11["items"][number], input: Aesthet
   const material = materialRaw ? normalizeDesignMaterial(materialRaw) : null;
   const parsedAttributes = aestheticFurnitureAttributesSchema.parse(attributes);
   return aestheticSpatialItemSchema.parse({
-    itemId: item.id, category: item.category, role: null, semanticRole: item.semanticPlacement.role,
+    itemId: item.id, category: item.category, subtype: item.subtype, role: null, semanticRole: item.semanticPlacement.role,
     placement: {
       approximatePosition: item.placement.approximatePosition ? { ...item.placement.approximatePosition } : null,
       preferredOrientationDegrees: item.placement.preferredOrientationDegrees, anchorWallId: item.placement.anchorWallId,
@@ -312,6 +313,7 @@ export function createAestheticDesignContext(input: AestheticDesignContextInput)
     status: input.spatialReport.status, valid: input.spatialReport.valid, physicallyValid: input.spatialReport.physicallyValid,
     functionallyValid: input.spatialReport.functionallyValid,
     violationIds: input.spatialReport.violations.map((violation) => violation.id).sort(),
+    violatingItemIds: [...new Set(input.spatialReport.violations.flatMap((violation) => violation.itemIds))].sort(),
     circulationStatus: input.spatialReport.circulation.status,
   };
   const rugIds = items.filter((item) => item.semanticRole === "AREA_RUG").map((item) => item.itemId);
@@ -327,7 +329,10 @@ export function createAestheticDesignContext(input: AestheticDesignContextInput)
     zones: zones.map((zone) => ({ ...zone, polygon: zone.polygon.map((vertex) => ({ ...vertex })), center: { ...zone.center } })), groups, items,
     spatialValidation: spatialStatus,
     metadataCoverage: [
-      coverageForDimension("scale_proportion", allIds, allIds),
+      coverageForDimension("scale_proportion", known((item) =>
+        [item.metadata.designMeasurements, item.metadata.catalogMeasurements].some((measurements) =>
+          measurements?.widthCm !== null && measurements?.widthCm !== undefined
+          && measurements.depthCm !== null && measurements.depthCm !== undefined)), allIds),
       coverageForDimension("style_harmony", known((item) => item.metadata.style.status === "KNOWN"), allIds),
       coverageForDimension("color_harmony", known((item) => item.metadata.color.status === "KNOWN"), allIds),
       coverageForDimension("material_harmony", known((item) => item.metadata.materials.status === "KNOWN"), allIds),

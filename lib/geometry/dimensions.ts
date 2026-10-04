@@ -53,6 +53,16 @@ export function getGeometryBounds(geometry: RoomGeometry) {
   };
 }
 
+/** Absolute shoelace area in square centimeters; valid for simple concave polygons. */
+export function getPolygonAreaCm2(vertices: readonly Pick<Vertex, "xCm" | "yCm">[]): number {
+  let twiceArea = 0;
+  vertices.forEach((vertex, index) => {
+    const next = vertices[(index + 1) % vertices.length];
+    twiceArea += vertex.xCm * next.yCm - next.xCm * vertex.yCm;
+  });
+  return Math.abs(twiceArea) / 2;
+}
+
 export function updateWallLength(
   geometry: RoomGeometry,
   wall: WallSegment,

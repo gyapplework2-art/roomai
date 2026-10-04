@@ -6,6 +6,7 @@ import type { DesignRole } from "./schema";
 import {
   SCALE_PROPORTION_TOLERANCE_RATIO,
   evaluateCandidateScaleProportion,
+  evaluateCandidateFootprintScaleProportion,
 } from "./scale-proportion";
 
 const role: DesignRole = {
@@ -195,4 +196,12 @@ test("candidate just beyond the tolerance boundary is incompatible", () => {
   assert.deepEqual(result.reasons, [
     "candidate_width_far_below_role_range",
   ]);
+});
+
+test("footprint-only eligibility reuses the existing 15% role tolerance without requiring height", () => {
+  assert.equal(evaluateCandidateFootprintScaleProportion(role, { widthCm: 180, depthCm: 80 }).compatibility, "compatible");
+  assert.equal(evaluateCandidateFootprintScaleProportion(role, { widthCm: 153, depthCm: 95 }).compatibility, "mixed");
+  assert.equal(evaluateCandidateFootprintScaleProportion(role, { widthCm: 152.9, depthCm: 95 }).compatibility, "incompatible");
+  assert.equal(evaluateCandidateFootprintScaleProportion(role, { widthCm: 276, depthCm: 95 }).compatibility, "mixed");
+  assert.equal(evaluateCandidateFootprintScaleProportion(role, { widthCm: 276.1, depthCm: 95 }).compatibility, "incompatible");
 });

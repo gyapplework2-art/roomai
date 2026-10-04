@@ -75,6 +75,28 @@ function evaluateDimension(
   };
 }
 
+function aggregateDimensionEvaluations(evaluations: readonly DimensionEvaluation[]): ScaleProportionEvaluation {
+  const reasons = evaluations.map((evaluation) => evaluation.reason)
+    .filter((reason): reason is ScaleProportionReason => reason !== null);
+  if (evaluations.some((evaluation) => evaluation.compatibility === "incompatible")) return { compatibility: "incompatible", reasons };
+  if (evaluations.some((evaluation) => evaluation.compatibility === "mixed")) return { compatibility: "mixed", reasons };
+  return { compatibility: "compatible", reasons: ["candidate_dimensions_within_role_range"] };
+}
+
+/** Width/depth-only role-envelope check for contexts where height is not required by the consuming rule. */
+export function evaluateCandidateFootprintScaleProportion(
+  role: Pick<DesignRole, "sizeRange">,
+  candidate: Pick<CatalogCandidate, "widthCm" | "depthCm">,
+): ScaleProportionEvaluation {
+  if (!isFinitePositive(candidate.widthCm) || !isFinitePositive(candidate.depthCm)) {
+    return { compatibility: "unknown", reasons: ["candidate_dimensions_missing_or_invalid"] };
+  }
+  return aggregateDimensionEvaluations([
+    evaluateDimension("width", candidate.widthCm, role.sizeRange.widthMinCm, role.sizeRange.widthMaxCm),
+    evaluateDimension("depth", candidate.depthCm, role.sizeRange.depthMinCm, role.sizeRange.depthMaxCm),
+  ]);
+}
+
 export function evaluateCandidateScaleProportion(
   role: DesignRole,
   candidate: CatalogCandidate,
@@ -111,26 +133,5 @@ export function evaluateCandidateScaleProportion(
     ),
   ];
 
-  const reasons = evaluations
-    .map((evaluation) => evaluation.reason)
-    .filter((reason): reason is ScaleProportionReason => reason !== null);
-
-  if (evaluations.some((evaluation) => evaluation.compatibility === "incompatible")) {
-    return {
-      compatibility: "incompatible",
-      reasons,
-    };
-  }
-
-  if (evaluations.some((evaluation) => evaluation.compatibility === "mixed")) {
-    return {
-      compatibility: "mixed",
-      reasons,
-    };
-  }
-
-  return {
-    compatibility: "compatible",
-    reasons: ["candidate_dimensions_within_role_range"],
-  };
+  return aggregateDimensionEvaluations(evaluations);
 }

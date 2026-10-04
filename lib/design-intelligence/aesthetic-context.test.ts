@@ -100,6 +100,7 @@ test("spatial invalidity and incomplete validation pass through without aestheti
   assert.deepEqual(invalidContext.spatialValidation, {
     status: invalidReport.status, valid: invalidReport.valid, physicallyValid: invalidReport.physicallyValid,
     functionallyValid: invalidReport.functionallyValid, violationIds: invalidReport.violations.map((entry) => entry.id).sort(),
+    violatingItemIds: [...new Set(invalidReport.violations.flatMap((entry) => entry.itemIds))].sort(),
     circulationStatus: invalidReport.circulation.status,
   });
   const partialReport = { ...invalidReport, status: "NOT_FULLY_EVALUATED" as const };
