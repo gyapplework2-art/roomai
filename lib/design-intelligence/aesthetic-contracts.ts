@@ -54,6 +54,7 @@ export const aestheticMaterialSchema = z.object({ value: identifier, family: aes
 
 export const colorTemperatureSchema = z.enum(["warm", "cool", "neutral", "unknown"]);
 export const visualWeightSchema = z.enum(["VERY_LIGHT", "LIGHT", "MEDIUM", "HEAVY", "VERY_HEAVY", "UNKNOWN"]);
+export const visualWeightClassificationSchema = z.enum(["LIGHT", "MEDIUM", "HEAVY", "UNKNOWN"]);
 export const variationIntentSchema = z.enum(["coordinated", "intentional_variation", "unknown"]);
 export const aestheticHarmonyRelationshipSchema = z.enum([
   "IDENTICAL", "SIMILAR", "COORDINATED", "COMPLEMENTARY", "INTENTIONAL_CONTRAST", "NEUTRAL", "CONFLICTING", "UNKNOWN",
@@ -92,6 +93,40 @@ export const aestheticIntentSchema = designIntentSchema.pick({
   formVariation: variationIntentSchema.default("unknown"),
 }).strict();
 
+const visualWeightSupportingEvidenceSchema = z.discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("DIMENSIONS"), source: z.enum(["catalog", "design_object"]),
+      widthCm: z.number().finite().positive().nullable(), depthCm: z.number().finite().positive().nullable(),
+      heightCm: z.number().finite().positive().nullable(), decisive: z.literal(false),
+    }).strict().refine((evidence) => evidence.widthCm !== null || evidence.depthCm !== null || evidence.heightCm !== null),
+    z.object({ kind: z.literal("MATERIAL"), source: z.enum(["catalog", "design_object", "normalized_attributes"]), values: z.array(aestheticMaterialSchema).min(1), decisive: z.literal(false) }).strict(),
+    z.object({ kind: z.literal("COLOR"), source: z.enum(["catalog", "design_object", "normalized_attributes"]), value: aestheticColorSchema, decisive: z.literal(false) }).strict(),
+    z.object({ kind: z.literal("NORMALIZED_FURNITURE_ATTRIBUTES"), source: z.literal("normalized_attributes"), values: aestheticFurnitureAttributesSchema, decisive: z.literal(false) })
+      .strict().refine((evidence) => Object.entries(evidence.values).some(([key, value]) => key !== "seatingCapacity" && value !== null)),
+  ]);
+
+export const aestheticVisualWeightObservationSchema = z.object({
+    itemId: identifier,
+    itemRole: designRoleSchema.nullable(),
+    itemCategory: identifier,
+    itemSubtype: identifier.nullable(),
+    classification: z.literal("UNKNOWN"),
+    evidenceStatus: z.literal("INSUFFICIENT_EVIDENCE"),
+    evaluator: z.object({ evaluatorId: identifier, ruleId: identifier, version: identifier }).strict(),
+    directFormEvidence: z.array(z.object({
+      attribute: z.enum([
+        "silhouette", "armStyle", "backStyle", "cushionStyle", "upholsteryType", "upholsteryMaterial",
+        "fabricTexture", "tufting", "legBaseStyle", "exposedWood", "exposedMetal", "heightProfile",
+      ]),
+      value: z.union([identifier, z.boolean()]),
+      source: z.literal("normalized_attributes"),
+    }).strict()),
+    supportingEvidence: z.array(visualWeightSupportingEvidenceSchema),
+    unavailableEvidence: z.array(z.enum([
+      "TRANSPARENCY", "BASE_OPENNESS", "FRAME_OPENNESS", "LEG_EXPOSURE", "SILHOUETTE_DENSITY",
+      "UPHOLSTERY_COVERAGE", "SOLID_OR_OPEN_CONSTRUCTION", "VISUAL_MASS_CLASS", "VISUAL_WEIGHT_CLASS",
+    ])),
+  }).strict();
 /** Appearance must be supplied explicitly; no vendor/name/title/price-derived inference. */
 export const aestheticItemSchema = z.object({
   itemId: identifier,
@@ -107,7 +142,13 @@ export const aestheticItemSchema = z.object({
     depthCm: z.number().finite().positive().nullable().default(null),
     heightCm: z.number().finite().positive().nullable().default(null),
   }).strict().default({ widthCm: null, depthCm: null, heightCm: null }),
-}).strict();
+  visualWeightEvidence: aestheticVisualWeightObservationSchema.nullable().default(null),
+}).strict().superRefine((item, context) => {
+  if (item.visualWeightEvidence && (item.visualWeightEvidence.itemId !== item.itemId
+    || item.visualWeight !== item.visualWeightEvidence.classification)) {
+    context.addIssue({ code: "custom", path: ["visualWeightEvidence"], message: "Visual-weight observation must match the item identity and classification." });
+  }
+});
 
 /** Existing pair concepts keep their identifiers; future coordination is distinct from spatial relationships. */
 export const aestheticRelationshipTypeSchema = z.enum([
@@ -442,4 +483,5 @@ export type AestheticIntent = z.infer<typeof aestheticIntentSchema>;
 export type AestheticItem = z.infer<typeof aestheticItemSchema>;
 export type AestheticRelationship = z.infer<typeof aestheticRelationshipSchema>;
 export type AestheticFinding = z.infer<typeof aestheticFindingSchema>;
+export type AestheticVisualWeightObservation = z.infer<typeof aestheticVisualWeightObservationSchema>;
 export type AestheticEvaluationReport = z.infer<typeof aestheticEvaluationReportSchema>;
