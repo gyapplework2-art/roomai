@@ -1,8 +1,5 @@
 import type { CatalogCandidate } from "@/lib/catalog/schema";
-import {
-  familiesHarmonize,
-  normalizeDesignColor,
-} from "@/lib/design-intelligence/color-harmony";
+import { evaluateColorPairHarmony } from "@/lib/design-intelligence/color-harmony";
 import type {
   DesignCompatibility,
   DesignRole,
@@ -149,51 +146,10 @@ function evaluateColorHarmony(
   desk: CatalogCandidate,
   chair: CatalogCandidate,
 ): DeskOfficeChairDimensionEvaluation {
-  if (!desk.normalizedColor || !chair.normalizedColor) {
-    return {
-      compatibility: "unknown",
-      reasons: ["relationship_color_missing"],
-    };
-  }
-
-  const deskColor = normalizeDesignColor(desk.normalizedColor);
-  const chairColor = normalizeDesignColor(chair.normalizedColor);
-
-  if (!deskColor || !chairColor) {
-    return {
-      compatibility: "unknown",
-      reasons: ["relationship_color_unknown"],
-    };
-  }
-
-  if (
-    desk.normalizedColor.trim().toLowerCase() ===
-    chair.normalizedColor.trim().toLowerCase()
-  ) {
-    return {
-      compatibility: "compatible",
-      reasons: ["relationship_colors_match"],
-    };
-  }
-
-  if (deskColor.family === chairColor.family) {
-    return {
-      compatibility: "compatible",
-      reasons: ["relationship_colors_share_family"],
-    };
-  }
-
-  if (familiesHarmonize(deskColor.family, chairColor.family)) {
-    return {
-      compatibility: "compatible",
-      reasons: ["relationship_colors_harmonize"],
-    };
-  }
-
-  return {
-    compatibility: "mixed",
-    reasons: ["relationship_colors_valid_but_not_aligned"],
-  };
+  const exactValueMatch = !!desk.normalizedColor?.trim() && !!chair.normalizedColor?.trim()
+    && desk.normalizedColor.trim().toLowerCase() === chair.normalizedColor.trim().toLowerCase();
+  const result = evaluateColorPairHarmony(desk.normalizedColor, chair.normalizedColor, exactValueMatch);
+  return { compatibility: result.compatibility, reasons: result.reasons };
 }
 
 function aggregateCompatibility(

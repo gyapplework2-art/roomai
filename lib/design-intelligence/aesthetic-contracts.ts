@@ -174,6 +174,66 @@ const evidenceValueSchema = z.union([z.string(), z.number().finite(), z.boolean(
 export const aestheticEvidenceObservationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("design_intent"), preference: z.enum(["STYLE", "COLOR", "MATERIAL", "TEXTURE", "HEIGHT_VARIATION", "FORM_VARIATION"]), values: z.array(evidenceValueSchema).min(1) }).strict(),
   z.object({
+    kind: z.literal("item_color_harmony"),
+    itemId: identifier,
+    color: aestheticColorSchema.nullable(),
+    colorSource: z.enum(["catalog", "design_object", "normalized_attributes"]).nullable(),
+    paletteColors: z.array(z.object({ role: z.enum(["primary", "secondary", "accent"]), color: aestheticColorSchema }).strict()),
+    matchedPaletteRole: z.enum(["primary", "secondary", "accent"]).nullable(),
+    relationship: z.enum(["IDENTICAL", "SIMILAR", "COORDINATED", "UNKNOWN"]),
+    compatibility: designCompatibilitySchema,
+    reasons: z.array(z.enum([
+      "candidate_color_missing", "candidate_color_unknown", "design_color_intent_missing",
+      "candidate_matches_primary_color", "candidate_matches_secondary_color", "candidate_matches_accent_color",
+      "candidate_same_family_as_primary", "candidate_same_family_as_secondary", "candidate_same_family_as_accent",
+      "candidate_harmonizes_with_primary", "candidate_harmonizes_with_secondary", "candidate_harmonizes_with_accent",
+      "candidate_color_valid_but_not_aligned",
+    ])).min(1),
+  }).strict().superRefine((observation, context) => {
+    if ((observation.color === null) !== (observation.colorSource === null)) context.addIssue({ code: "custom", path: ["colorSource"], message: "Item color provenance must match color availability." });
+    const expectedRelationship = observation.reasons.some((reason) => reason.startsWith("candidate_matches_")) ? "IDENTICAL"
+      : observation.reasons.some((reason) => reason.startsWith("candidate_same_family_as_")) ? "SIMILAR"
+        : observation.reasons.some((reason) => reason.startsWith("candidate_harmonizes_with_")) ? "COORDINATED" : "UNKNOWN";
+    if (observation.relationship !== expectedRelationship) context.addIssue({ code: "custom", path: ["relationship"], message: "Palette relationship must preserve existing color evaluator semantics." });
+    if (expectedRelationship !== "UNKNOWN" && observation.compatibility !== "compatible") context.addIssue({ code: "custom", path: ["compatibility"], message: "Matched, similar, and harmonized palette colors are compatible." });
+    if (observation.reasons.includes("candidate_color_valid_but_not_aligned") && observation.compatibility !== "mixed") context.addIssue({ code: "custom", path: ["compatibility"], message: "Valid but unaligned palette color remains mixed, not conflict." });
+    if ((observation.reasons.includes("candidate_color_missing") || observation.reasons.includes("candidate_color_unknown") || observation.reasons.includes("design_color_intent_missing"))
+      && observation.compatibility !== "unknown") context.addIssue({ code: "custom", path: ["compatibility"], message: "Missing or unsupported colors remain unknown." });
+  }),
+  z.object({
+    kind: z.literal("pair_color_harmony"),
+    relationshipType: aestheticRelationshipTypeSchema,
+    pairItems: z.array(z.object({
+      itemId: identifier,
+      semanticRole: furnitureRoleSchema.nullable(),
+      category: identifier,
+      subtype: identifier.nullable(),
+      color: aestheticColorSchema.nullable(),
+      colorSource: z.enum(["catalog", "design_object", "normalized_attributes"]).nullable(),
+    }).strict()).length(2),
+    relationshipSources: z.array(z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("E10A_GROUP"), groupId: identifier }).strict(),
+      z.object({ kind: z.literal("SEMANTIC_RELATIONSHIP"), relationshipType: z.literal("GROUPED_WITH") }).strict(),
+    ])).min(1),
+    relationship: z.enum(["IDENTICAL", "SIMILAR", "COORDINATED", "UNKNOWN"]),
+    compatibility: designCompatibilitySchema,
+    reasons: z.array(z.enum([
+      "relationship_color_missing", "relationship_color_unknown", "relationship_colors_match",
+      "relationship_colors_share_family", "relationship_colors_harmonize", "relationship_colors_valid_but_not_aligned",
+    ])).min(1),
+  }).strict().superRefine((observation, context) => {
+    const itemIds = observation.pairItems.map((item) => item.itemId);
+    if (new Set(itemIds).size !== itemIds.length || itemIds[0] > itemIds[1]) context.addIssue({ code: "custom", path: ["pairItems"], message: "Color pair members must be distinct and canonically ordered." });
+    if (observation.pairItems.some((item) => (item.color === null) !== (item.colorSource === null))) context.addIssue({ code: "custom", path: ["pairItems"], message: "Pair color provenance must match color availability." });
+    const expectedRelationship = observation.reasons.includes("relationship_colors_match") ? "IDENTICAL"
+      : observation.reasons.includes("relationship_colors_share_family") ? "SIMILAR"
+        : observation.reasons.includes("relationship_colors_harmonize") ? "COORDINATED" : "UNKNOWN";
+    if (observation.relationship !== expectedRelationship) context.addIssue({ code: "custom", path: ["relationship"], message: "Pair relationship must preserve existing color-rule semantics." });
+    if (expectedRelationship !== "UNKNOWN" && observation.compatibility !== "compatible") context.addIssue({ code: "custom", path: ["compatibility"], message: "Harmonious pair classifications must be compatible." });
+    if (observation.reasons.includes("relationship_colors_valid_but_not_aligned") && observation.compatibility !== "mixed") context.addIssue({ code: "custom", path: ["compatibility"], message: "Valid but unaligned colors remain mixed, not conflict." });
+    if ((observation.reasons.includes("relationship_color_missing") || observation.reasons.includes("relationship_color_unknown")) && observation.compatibility !== "unknown") context.addIssue({ code: "custom", path: ["compatibility"], message: "Missing or unsupported colors remain unknown." });
+  }),
+  z.object({
     kind: z.literal("room_furniture_scale"),
     roomId: identifier,
     roomAreaCm2: z.number().finite().positive(),
@@ -212,7 +272,7 @@ export const aestheticEvidenceObservationSchema = z.discriminatedUnion("kind", [
     relationshipType: z.literal("sofa_rug"),
     pairItems: z.array(z.object({
       itemId: identifier,
-      semanticRole: furnitureRoleSchema,
+      semanticRole: furnitureRoleSchema.nullable(),
       category: identifier,
       subtype: identifier.nullable(),
     }).strict()).length(2),
@@ -299,6 +359,10 @@ const evidenceSchema = z.object({
   if ((evidence.source === "measured_dimensions") !== (evidence.observation.kind === "measurement" || evidence.observation.kind === "room_furniture_scale" || evidence.observation.kind === "furniture_proportion")) {
     context.addIssue({ code: "custom", path: ["observation"], message: "Measured-dimension sources require a measurement observation, and vice versa." });
   }
+  if ((evidence.observation.kind === "item_color_harmony" || evidence.observation.kind === "pair_color_harmony")
+    && evidence.source !== "normalized_attributes") {
+    context.addIssue({ code: "custom", path: ["source"], message: "Normalized color evidence must use its normalized-attribute source." });
+  }
 });
 
 const missingInformationSchema = z.object({
@@ -351,6 +415,8 @@ export const aestheticFindingSchema = z.object({
   }
   for (const evidence of finding.supportingEvidence) {
     const evidenceItems = evidence.observation.kind === "design_intent" ? []
+      : evidence.observation.kind === "item_color_harmony" ? [evidence.observation.itemId]
+      : evidence.observation.kind === "pair_color_harmony" ? evidence.observation.pairItems.map((item) => item.itemId)
       : evidence.observation.kind === "room_furniture_scale" ? [evidence.observation.itemId]
       : evidence.observation.kind === "furniture_proportion" ? evidence.observation.pairItems.map((item) => item.itemId)
       : evidence.observation.kind === "measurement" || evidence.observation.kind === "normalized_attribute"
@@ -383,6 +449,34 @@ export const aestheticFindingSchema = z.object({
       if (observation.assessmentStatus === "INSUFFICIENT_EVIDENCE"
         && (finding.coverage.status !== "INSUFFICIENT_EVIDENCE" || finding.compatibility !== "unknown")) {
         issue(["coverage"], "Incomplete furniture-proportion findings must remain unknown and insufficient.");
+      }
+    }
+    if (observation.kind === "item_color_harmony") {
+      if (finding.target.kind !== "dimension" || finding.target.dimension !== "color_harmony"
+        || finding.itemIds.length !== 1 || finding.itemIds[0] !== observation.itemId) {
+        issue(["supportingEvidence"], "Item/palette color evidence must match a single-item color-harmony finding.");
+      }
+      const exact = observation.reasons.some((reason) => reason.startsWith("candidate_matches_"));
+      const sameFamily = observation.reasons.some((reason) => reason.startsWith("candidate_same_family_as_"));
+      const harmonizes = observation.reasons.some((reason) => reason.startsWith("candidate_harmonizes_with_"));
+      const unaligned = observation.reasons.includes("candidate_color_valid_but_not_aligned");
+      if ((exact && observation.relationship !== "IDENTICAL") || (sameFamily && observation.relationship !== "SIMILAR")
+        || (harmonizes && observation.relationship !== "COORDINATED") || (unaligned && observation.relationship !== "UNKNOWN")) {
+        issue(["supportingEvidence"], "Palette relationship must preserve the existing color evaluator result.");
+      }
+      if ((exact || sameFamily || harmonizes) && observation.compatibility !== "compatible") issue(["supportingEvidence"], "Matched/similar/harmonized palette colors must remain compatible.");
+      if (unaligned && observation.compatibility !== "mixed") issue(["supportingEvidence"], "Valid but unaligned palette colors remain mixed, not conflict.");
+      if ((observation.reasons.includes("candidate_color_missing") || observation.reasons.includes("candidate_color_unknown") || observation.reasons.includes("design_color_intent_missing"))
+        && observation.compatibility !== "unknown") issue(["supportingEvidence"], "Missing or unsupported item/palette colors remain unknown.");
+    }
+    if (observation.kind === "pair_color_harmony") {
+      const pairItemIds = observation.pairItems.map((item) => item.itemId);
+      if (finding.target.kind !== "relationship" || finding.target.relationshipType !== observation.relationshipType
+        || finding.target.dimension !== "color_harmony" || JSON.stringify(pairItemIds) !== JSON.stringify([...finding.itemIds].sort())) {
+        issue(["supportingEvidence"], "Pair color evidence must match the finding relationship and both members.");
+      }
+      if (evidence.itemIds.length !== pairItemIds.length || pairItemIds.some((id) => !evidence.itemIds.includes(id))) {
+        issue(["supportingEvidence"], "Pair color evidence must reference exactly both members.");
       }
     }
   }

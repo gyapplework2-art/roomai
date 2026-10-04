@@ -4,6 +4,7 @@ import test from "node:test";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
 import {
   evaluateCandidateColorHarmony,
+  evaluateColorPairHarmony,
   normalizeDesignColor,
 } from "./color-harmony";
 
@@ -82,6 +83,34 @@ test("exact primary color match is compatible", () => {
 
   assert.equal(result.compatibility, "compatible");
   assert.deepEqual(result.reasons, ["candidate_matches_primary_color"]);
+});
+
+test("pair harmony distinguishes identical colors without ranking sameness", () => {
+  const result = evaluateColorPairHarmony("cream", "cream");
+  assert.equal(result.compatibility, "compatible");
+  assert.equal(result.relationship, "IDENTICAL");
+  assert.deepEqual(result.reasons, ["relationship_colors_match"]);
+});
+
+test("same-family and harmonious-family colors remain coordinated without exact sameness", () => {
+  const similar = evaluateColorPairHarmony("warm_taupe", "beige");
+  assert.equal(similar.relationship, "SIMILAR");
+  assert.equal(similar.compatibility, "compatible");
+  const coordinated = evaluateColorPairHarmony("cream", "brown");
+  assert.equal(coordinated.relationship, "COORDINATED");
+  assert.equal(coordinated.compatibility, "compatible");
+});
+
+test("valid but unaligned colors remain mixed, not intrinsically conflicting", () => {
+  const result = evaluateColorPairHarmony("blue", "orange");
+  assert.equal(result.compatibility, "mixed");
+  assert.equal(result.relationship, "UNKNOWN");
+  assert.deepEqual(result.reasons, ["relationship_colors_valid_but_not_aligned"]);
+});
+
+test("missing or unsupported pair colors remain unknown", () => {
+  assert.equal(evaluateColorPairHarmony(null, "cream").compatibility, "unknown");
+  assert.equal(evaluateColorPairHarmony("mystery", "cream").compatibility, "unknown");
 });
 
 test("exact secondary color match is compatible", () => {

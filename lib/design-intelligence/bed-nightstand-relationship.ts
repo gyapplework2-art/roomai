@@ -1,8 +1,5 @@
 import type { CatalogCandidate } from "@/lib/catalog/schema";
-import {
-  familiesHarmonize,
-  normalizeDesignColor,
-} from "@/lib/design-intelligence/color-harmony";
+import { evaluateColorPairHarmony } from "@/lib/design-intelligence/color-harmony";
 import type {
   DesignCompatibility,
   DesignRole,
@@ -152,53 +149,10 @@ function evaluateColorHarmony(
   bed: CatalogCandidate,
   nightstand: CatalogCandidate,
 ): BedNightstandDimensionEvaluation {
-  if (!bed.normalizedColor || !nightstand.normalizedColor) {
-    return {
-      compatibility: "unknown",
-      reasons: ["relationship_color_missing"],
-    };
-  }
-
-  const bedColor = normalizeDesignColor(bed.normalizedColor);
-  const nightstandColor = normalizeDesignColor(
-    nightstand.normalizedColor,
-  );
-
-  if (!bedColor || !nightstandColor) {
-    return {
-      compatibility: "unknown",
-      reasons: ["relationship_color_unknown"],
-    };
-  }
-
-  if (
-    bed.normalizedColor.trim().toLowerCase() ===
-    nightstand.normalizedColor.trim().toLowerCase()
-  ) {
-    return {
-      compatibility: "compatible",
-      reasons: ["relationship_colors_match"],
-    };
-  }
-
-  if (bedColor.family === nightstandColor.family) {
-    return {
-      compatibility: "compatible",
-      reasons: ["relationship_colors_share_family"],
-    };
-  }
-
-  if (familiesHarmonize(bedColor.family, nightstandColor.family)) {
-    return {
-      compatibility: "compatible",
-      reasons: ["relationship_colors_harmonize"],
-    };
-  }
-
-  return {
-    compatibility: "mixed",
-    reasons: ["relationship_colors_valid_but_not_aligned"],
-  };
+  const exactValueMatch = !!bed.normalizedColor?.trim() && !!nightstand.normalizedColor?.trim()
+    && bed.normalizedColor.trim().toLowerCase() === nightstand.normalizedColor.trim().toLowerCase();
+  const result = evaluateColorPairHarmony(bed.normalizedColor, nightstand.normalizedColor, exactValueMatch);
+  return { compatibility: result.compatibility, reasons: result.reasons };
 }
 
 function aggregateCompatibility(

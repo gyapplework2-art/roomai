@@ -1,8 +1,5 @@
 import type { CatalogCandidate } from "@/lib/catalog/schema";
-import {
-  familiesHarmonize,
-  normalizeDesignColor,
-} from "@/lib/design-intelligence/color-harmony";
+import { evaluateColorPairHarmony } from "@/lib/design-intelligence/color-harmony";
 import type {
   DesignCompatibility,
   DesignRole,
@@ -134,51 +131,8 @@ function evaluateColorHarmony(
   seating: CatalogCandidate,
   rug: CatalogCandidate,
 ): SofaRugDimensionEvaluation {
-  if (
-    !seating.normalizedColor?.trim() ||
-    !rug.normalizedColor?.trim()
-  ) {
-    return {
-      compatibility: "unknown",
-      reasons: ["relationship_color_missing"],
-    };
-  }
-
-  const seatingColor = normalizeDesignColor(seating.normalizedColor);
-  const rugColor = normalizeDesignColor(rug.normalizedColor);
-
-  if (!seatingColor || !rugColor) {
-    return {
-      compatibility: "unknown",
-      reasons: ["relationship_color_unknown"],
-    };
-  }
-
-  if (seatingColor.value === rugColor.value) {
-    return {
-      compatibility: "compatible",
-      reasons: ["relationship_colors_match"],
-    };
-  }
-
-  if (seatingColor.family === rugColor.family) {
-    return {
-      compatibility: "compatible",
-      reasons: ["relationship_colors_share_family"],
-    };
-  }
-
-  if (familiesHarmonize(seatingColor.family, rugColor.family)) {
-    return {
-      compatibility: "compatible",
-      reasons: ["relationship_colors_harmonize"],
-    };
-  }
-
-  return {
-    compatibility: "mixed",
-    reasons: ["relationship_colors_valid_but_not_aligned"],
-  };
+  const result = evaluateColorPairHarmony(seating.normalizedColor, rug.normalizedColor);
+  return { compatibility: result.compatibility, reasons: result.reasons };
 }
 
 function overallCompatibility(

@@ -44,6 +44,20 @@ export type ColorHarmonyEvaluation = {
   reasons: ColorHarmonyReason[];
 };
 
+export type ColorPairHarmonyRelationship = "IDENTICAL" | "SIMILAR" | "COORDINATED" | "UNKNOWN";
+export type ColorPairHarmonyReason =
+  | "relationship_color_missing"
+  | "relationship_color_unknown"
+  | "relationship_colors_match"
+  | "relationship_colors_share_family"
+  | "relationship_colors_harmonize"
+  | "relationship_colors_valid_but_not_aligned";
+export type ColorPairHarmonyEvaluation = {
+  compatibility: DesignCompatibility;
+  relationship: ColorPairHarmonyRelationship;
+  reasons: ColorPairHarmonyReason[];
+};
+
 const COLOR_ALIASES: Record<string, DesignColorFamily> = {
   white: "white",
   soft_white: "white",
@@ -146,9 +160,35 @@ export function familiesHarmonize(
   );
 }
 
+/** Existing family-based pair semantics shared by relationship evaluators and B.3.1. */
+export function evaluateColorPairHarmony(
+  firstColor: string | null,
+  secondColor: string | null,
+  exactValueMatch?: boolean,
+): ColorPairHarmonyEvaluation {
+  if (!firstColor?.trim() || !secondColor?.trim()) {
+    return { compatibility: "unknown", relationship: "UNKNOWN", reasons: ["relationship_color_missing"] };
+  }
+  const first = normalizeDesignColor(firstColor);
+  const second = normalizeDesignColor(secondColor);
+  if (!first || !second) {
+    return { compatibility: "unknown", relationship: "UNKNOWN", reasons: ["relationship_color_unknown"] };
+  }
+  if (exactValueMatch ?? first.value === second.value) {
+    return { compatibility: "compatible", relationship: "IDENTICAL", reasons: ["relationship_colors_match"] };
+  }
+  if (first.family === second.family) {
+    return { compatibility: "compatible", relationship: "SIMILAR", reasons: ["relationship_colors_share_family"] };
+  }
+  if (familiesHarmonize(first.family, second.family)) {
+    return { compatibility: "compatible", relationship: "COORDINATED", reasons: ["relationship_colors_harmonize"] };
+  }
+  return { compatibility: "mixed", relationship: "UNKNOWN", reasons: ["relationship_colors_valid_but_not_aligned"] };
+}
+
 export function evaluateCandidateColorHarmony(
   intent: Pick<DesignIntent, "colors">,
-  candidate: CatalogCandidate,
+  candidate: Pick<CatalogCandidate, "normalizedColor">,
 ): ColorHarmonyEvaluation {
   if (!candidate.normalizedColor?.trim()) {
     return {
