@@ -45,12 +45,16 @@ export function buildAestheticEvaluationReport(input: BuildAestheticEvaluationRe
   const coverage = aestheticDimensions.map((dimension) => dimensions.get(dimension) ?? {
     dimension, status: "NOT_EVALUATED" as const, itemIds: [], reason: "No evaluator coverage was supplied for this dimension.",
   });
-  const evaluatedItemIds = [...new Set(coverage.filter((entry) => entry.status === "EVALUATED").flatMap((entry) => entry.itemIds))].sort(compareText);
   const findings = canonicalizeAestheticFindings(input.findings);
+  const evaluatedItemIds = [...new Set([
+    ...coverage.filter((entry) => entry.status === "EVALUATED").flatMap((entry) => entry.itemIds),
+    ...findings.filter((finding) => finding.coverage.status === "EVALUATED").flatMap((finding) => finding.itemIds),
+  ])].sort(compareText);
   const diagnostics = [...(input.diagnostics ?? [])].map((entry) => ({ ...entry, itemIds: [...entry.itemIds].sort(compareText) }))
     .sort((first, second) => compareText(first.code, second.code) || compareText(first.itemIds.join("\0"), second.itemIds.join("\0")));
-  const evaluated = coverage.some((entry) => entry.status === "EVALUATED");
-  const incomplete = coverage.some((entry) => entry.status === "INSUFFICIENT_EVIDENCE" || entry.status === "NOT_EVALUATED");
+  const evaluated = coverage.some((entry) => entry.status === "EVALUATED") || findings.some((finding) => finding.coverage.status === "EVALUATED");
+  const incomplete = coverage.some((entry) => entry.status === "INSUFFICIENT_EVIDENCE" || entry.status === "NOT_EVALUATED")
+    || findings.some((finding) => finding.coverage.status === "INSUFFICIENT_EVIDENCE" || finding.coverage.status === "NOT_EVALUATED");
   return aestheticEvaluationReportSchema.parse({
     contractVersion: "1.0",
     intent: input.context.preferences?.intent ?? null,

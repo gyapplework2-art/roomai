@@ -6,6 +6,7 @@ import type { DesignRole } from "@/lib/design-intelligence/schema";
 import {
   SOFA_RUG_COMPATIBLE_WIDTH_RATIO,
   SOFA_RUG_MIXED_WIDTH_RATIO,
+  evaluateSofaRugScaleProportion,
   evaluateSofaRugRelationship,
 } from "@/lib/design-intelligence/sofa-rug-relationship";
 
@@ -204,6 +205,17 @@ test("missing relationship dimensions produce unknown", () => {
   );
 
   assert.equal(result.scaleProportion.compatibility, "unknown");
+});
+
+test("width-only proportion adapter reuses existing thresholds and is argument-order invariant", () => {
+  const forward = evaluateSofaRugScaleProportion(sofaRole, 200, rugRole, 150);
+  const reversed = evaluateSofaRugScaleProportion(rugRole, 150, sofaRole, 200);
+  assert.deepEqual(forward, reversed);
+  assert.equal(forward.applicable, true);
+  assert.equal(forward.scaleProportion.compatibility, "compatible");
+  assert.deepEqual(evaluateSofaRugScaleProportion(sofaRole, null, rugRole, 150).scaleProportion, {
+    compatibility: "unknown", reasons: ["relationship_dimensions_missing_or_invalid"],
+  });
 });
 
 test("exact relationship colors are compatible", () => {

@@ -9,6 +9,9 @@ import { designCompatibilitySchema, designIntentSchema, designRoleSchema } from 
 import { furnitureRoleSchema } from "@/lib/furniture-planning/semantic-schema";
 
 const identifier = z.string().trim().min(1).max(160);
+const relationshipIdentifier = z.string().trim().min(1).max(400);
+const findingIdentifier = z.string().trim().min(1).max(400);
+const evidenceIdentifier = z.string().trim().min(1).max(400);
 const explanation = z.string().trim().min(1).max(2000);
 const stableCode = z.string().regex(/^[a-z][a-z0-9]*(?:[._][a-z0-9]+)*$/).max(160);
 const distinctItemIds = z.array(identifier).refine((ids) => new Set(ids).size === ids.length, "Item references must be distinct.");
@@ -116,7 +119,7 @@ export const aestheticRelationshipTypeSchema = z.enum([
 
 /** Declaring any of these relationships does not declare its evaluator implemented. */
 export const aestheticRelationshipSchema = z.object({
-  relationshipId: identifier,
+  relationshipId: relationshipIdentifier,
   type: aestheticRelationshipTypeSchema,
   itemIds: distinctItemIds.refine((ids) => ids.length >= 2, "An aesthetic relationship requires at least two items."),
 }).strict();
@@ -163,6 +166,70 @@ export const aestheticEvidenceObservationSchema = z.discriminatedUnion("kind", [
     }
     if ((observation.groupId === null) !== (observation.supportingItemIds.length === 0)) context.addIssue({ code: "custom", path: ["supportingItemIds"], message: "Group evidence must identify its supporting items." });
   }),
+  z.object({
+    kind: z.literal("furniture_proportion"),
+    relationshipType: z.literal("sofa_rug"),
+    pairItems: z.array(z.object({
+      itemId: identifier,
+      semanticRole: furnitureRoleSchema,
+      category: identifier,
+      subtype: identifier.nullable(),
+    }).strict()).length(2),
+    relationshipSources: z.array(z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("E10A_GROUP"), groupId: identifier }).strict(),
+      z.object({ kind: z.literal("SEMANTIC_RELATIONSHIP"), relationshipType: z.literal("GROUPED_WITH") }).strict(),
+    ])).min(1),
+    measurements: z.object({
+      seatingWidthCm: z.number().finite().positive().nullable(),
+      seatingWidthSource: z.enum(["catalog", "design_object"]).nullable(),
+      rugWidthCm: z.number().finite().positive().nullable(),
+      rugWidthSource: z.enum(["catalog", "design_object"]).nullable(),
+      rugToSeatingWidthRatio: z.number().finite().nonnegative().nullable(),
+    }).strict(),
+    rule: z.object({
+      evaluatorId: identifier,
+      ruleId: identifier,
+      version: identifier,
+      compatibleAtOrAbove: z.literal(0.75),
+      mixedAtOrAbove: z.literal(0.6),
+      ratioMeaning: z.literal("rug_width_over_seating_width"),
+    }).strict(),
+    ruleResult: designCompatibilitySchema,
+    assessmentStatus: z.enum(["EVALUATED", "INSUFFICIENT_EVIDENCE"]),
+    assessmentReason: z.enum(["MISSING_REQUIRED_WIDTH", "PAIR_MEMBER_SPATIAL_VIOLATION"]).nullable(),
+    reasons: z.array(z.enum([
+      "relationship_dimensions_missing_or_invalid",
+      "rug_width_proportionate_to_seating",
+      "rug_width_somewhat_small_for_seating",
+      "rug_width_too_small_for_seating",
+    ])),
+  }).strict().superRefine((observation, context) => {
+    const itemIds = observation.pairItems.map((item) => item.itemId);
+    if (new Set(itemIds).size !== itemIds.length) context.addIssue({ code: "custom", path: ["pairItems"], message: "Proportion pair item IDs must be distinct." });
+    if (itemIds[0] > itemIds[1]) context.addIssue({ code: "custom", path: ["pairItems"], message: "Proportion pair items must use canonical item-ID order." });
+    const sourceKeys = observation.relationshipSources.map((source) => source.kind === "E10A_GROUP" ? `${source.kind}:${source.groupId}` : source.kind);
+    if (new Set(sourceKeys).size !== sourceKeys.length || sourceKeys.some((key, index) => index > 0 && sourceKeys[index - 1] > key)) {
+      context.addIssue({ code: "custom", path: ["relationshipSources"], message: "Relationship sources must be unique and canonically ordered." });
+    }
+    const { seatingWidthCm, rugWidthCm, rugToSeatingWidthRatio } = observation.measurements;
+    if ((seatingWidthCm === null) !== (observation.measurements.seatingWidthSource === null)
+      || (rugWidthCm === null) !== (observation.measurements.rugWidthSource === null)) {
+      context.addIssue({ code: "custom", path: ["measurements"], message: "Width provenance must be present exactly when the measurement is present." });
+    }
+    if (seatingWidthCm === null || rugWidthCm === null) {
+      if (rugToSeatingWidthRatio !== null || observation.ruleResult !== "unknown"
+        || observation.assessmentStatus !== "INSUFFICIENT_EVIDENCE" || observation.assessmentReason !== "MISSING_REQUIRED_WIDTH") {
+        context.addIssue({ code: "custom", path: ["measurements"], message: "Missing widths require an unknown ratio and explicit insufficient-evidence status." });
+      }
+    } else {
+      const ratio = rugWidthCm / seatingWidthCm;
+      const expected = ratio >= 0.75 ? "compatible" : ratio >= 0.6 ? "mixed" : "incompatible";
+      if (rugToSeatingWidthRatio === null || Math.abs(ratio - rugToSeatingWidthRatio) > 1e-9) context.addIssue({ code: "custom", path: ["measurements", "rugToSeatingWidthRatio"], message: "Rug/seating ratio must match the measured widths." });
+      if (observation.ruleResult !== expected) context.addIssue({ code: "custom", path: ["ruleResult"], message: "Rule result must match the existing sofa/rug width thresholds." });
+      if (observation.assessmentStatus === "INSUFFICIENT_EVIDENCE" && observation.assessmentReason !== "PAIR_MEMBER_SPATIAL_VIOLATION") context.addIssue({ code: "custom", path: ["assessmentReason"], message: "Complete dimensions can only be insufficient when a pair member has a spatial violation." });
+    }
+    if ((observation.assessmentStatus === "EVALUATED") !== (observation.assessmentReason === null)) context.addIssue({ code: "custom", path: ["assessmentReason"], message: "Evaluation status and reason must agree." });
+  }),
   z.object({ kind: z.literal("attribute_comparison"), attribute: aestheticAttributeCategorySchema,
     subjectIds: z.array(identifier).min(2), values: z.array(evidenceValueSchema).min(2), relationship: aestheticHarmonyRelationshipSchema }).strict(),
   z.object({ kind: z.literal("measurement"), attribute: aestheticAttributeCategorySchema, subjectId: identifier,
@@ -176,7 +243,7 @@ export const aestheticEvidenceObservationSchema = z.discriminatedUnion("kind", [
 ]);
 
 const evidenceSchema = z.object({
-  evidenceId: identifier,
+  evidenceId: evidenceIdentifier,
   source: z.enum(["design_intent", "normalized_attributes", "measured_dimensions", "explicit_visual_observation"]),
   dimension: aestheticDimensionSchema,
   itemIds: distinctItemIds,
@@ -188,7 +255,7 @@ const evidenceSchema = z.object({
   if ((evidence.source === "design_intent") !== (evidence.observation.kind === "design_intent")) {
     context.addIssue({ code: "custom", path: ["observation"], message: "Design-intent sources require a design-intent observation, and vice versa." });
   }
-  if ((evidence.source === "measured_dimensions") !== (evidence.observation.kind === "measurement" || evidence.observation.kind === "room_furniture_scale")) {
+  if ((evidence.source === "measured_dimensions") !== (evidence.observation.kind === "measurement" || evidence.observation.kind === "room_furniture_scale" || evidence.observation.kind === "furniture_proportion")) {
     context.addIssue({ code: "custom", path: ["observation"], message: "Measured-dimension sources require a measurement observation, and vice versa." });
   }
 });
@@ -201,11 +268,11 @@ const missingInformationSchema = z.object({
 }).strict();
 
 export const aestheticFindingSchema = z.object({
-  findingId: identifier,
+  findingId: findingIdentifier,
   code: stableCode,
   target: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("dimension"), dimension: aestheticDimensionSchema }).strict(),
-    z.object({ kind: z.literal("relationship"), relationshipId: identifier, relationshipType: aestheticRelationshipTypeSchema, dimension: aestheticDimensionSchema }).strict(),
+    z.object({ kind: z.literal("relationship"), relationshipId: relationshipIdentifier, relationshipType: aestheticRelationshipTypeSchema, dimension: aestheticDimensionSchema }).strict(),
   ]),
   subjects: z.array(aestheticSubjectSchema).min(1),
   itemIds: distinctItemIds,
@@ -244,6 +311,7 @@ export const aestheticFindingSchema = z.object({
   for (const evidence of finding.supportingEvidence) {
     const evidenceItems = evidence.observation.kind === "design_intent" ? []
       : evidence.observation.kind === "room_furniture_scale" ? [evidence.observation.itemId]
+      : evidence.observation.kind === "furniture_proportion" ? evidence.observation.pairItems.map((item) => item.itemId)
       : evidence.observation.kind === "measurement" || evidence.observation.kind === "normalized_attribute"
       ? [evidence.observation.subjectId]
       : evidence.observation.subjectIds;
@@ -256,6 +324,24 @@ export const aestheticFindingSchema = z.object({
       }
       if (evidence.itemIds.length !== 1 || evidence.itemIds[0] !== observation.itemId) {
         issue(["supportingEvidence"], "Room-scale evidence item references must identify the evaluated primary item.");
+      }
+    }
+    if (observation.kind === "furniture_proportion") {
+      const pairItemIds = observation.pairItems.map((item) => item.itemId).sort();
+      if (finding.target.kind !== "relationship" || finding.target.relationshipType !== observation.relationshipType
+        || finding.target.dimension !== "scale_proportion" || JSON.stringify(pairItemIds) !== JSON.stringify([...finding.itemIds].sort())) {
+        issue(["supportingEvidence"], "Furniture-proportion evidence must match the finding relationship and both pair members.");
+      }
+      if (evidence.itemIds.length !== pairItemIds.length || pairItemIds.some((id) => !evidence.itemIds.includes(id))) {
+        issue(["supportingEvidence"], "Furniture-proportion evidence must identify exactly both pair members.");
+      }
+      if (observation.assessmentStatus === "EVALUATED"
+        && (finding.coverage.status !== "EVALUATED" || finding.compatibility !== observation.ruleResult)) {
+        issue(["coverage"], "Evaluated furniture-proportion findings must preserve the existing rule result.");
+      }
+      if (observation.assessmentStatus === "INSUFFICIENT_EVIDENCE"
+        && (finding.coverage.status !== "INSUFFICIENT_EVIDENCE" || finding.compatibility !== "unknown")) {
+        issue(["coverage"], "Incomplete furniture-proportion findings must remain unknown and insufficient.");
       }
     }
   }
@@ -294,11 +380,16 @@ export const aestheticEvaluationReportSchema = z.object({
     issue(["coverage"], "Reports must include every aesthetic dimension exactly once.");
   }
   if (new Set(report.evaluatedItemIds).size !== report.evaluatedItemIds.length) issue(["evaluatedItemIds"], "Evaluated item IDs must be unique.");
-  const evaluated = report.coverage.some((entry) => entry.status === "EVALUATED");
-  const incomplete = report.coverage.some((entry) => entry.status === "INSUFFICIENT_EVIDENCE" || entry.status === "NOT_EVALUATED");
+  const evaluated = report.coverage.some((entry) => entry.status === "EVALUATED")
+    || report.findings.some((finding) => finding.coverage.status === "EVALUATED");
+  const incomplete = report.coverage.some((entry) => entry.status === "INSUFFICIENT_EVIDENCE" || entry.status === "NOT_EVALUATED")
+    || report.findings.some((finding) => finding.coverage.status === "INSUFFICIENT_EVIDENCE" || finding.coverage.status === "NOT_EVALUATED");
   const expectedStatus = !evaluated ? "NOT_EVALUATED" : incomplete ? "PARTIALLY_EVALUATED" : "EVALUATED";
   if (report.status !== expectedStatus) issue(["status"], `Report status must be ${expectedStatus} for its coverage.`);
-  const expectedEvaluatedItems = [...new Set(report.coverage.filter((entry) => entry.status === "EVALUATED").flatMap((entry) => entry.itemIds))].sort();
+  const expectedEvaluatedItems = [...new Set([
+    ...report.coverage.filter((entry) => entry.status === "EVALUATED").flatMap((entry) => entry.itemIds),
+    ...report.findings.filter((finding) => finding.coverage.status === "EVALUATED").flatMap((finding) => finding.itemIds),
+  ])].sort();
   if (JSON.stringify(report.evaluatedItemIds) !== JSON.stringify(expectedEvaluatedItems)) issue(["evaluatedItemIds"], "Evaluated item IDs must match evaluated coverage.");
   const dimensionOrder = new Map(aestheticDimensions.map((dimension, index) => [dimension, index]));
   const orderedCoverage = [...report.coverage].sort((first, second) => dimensionOrder.get(first.dimension)! - dimensionOrder.get(second.dimension)!);
@@ -327,6 +418,10 @@ export const aestheticEvaluationReportSchema = z.object({
   });
   report.findings.forEach((finding, index) => {
     if (finding.itemIds.some((id) => !itemIds.has(id))) issue(["findings", index, "itemIds"], "Finding references must identify report items.");
+    const dimensionCoverage = report.coverage.find((entry) => entry.dimension === finding.target.dimension);
+    if (dimensionCoverage?.status === "NOT_APPLICABLE" && finding.coverage.status === "EVALUATED") {
+      issue(["findings", index, "coverage"], "An evaluated finding cannot target a not-applicable report dimension.");
+    }
     for (const subject of finding.subjects) if (subject.kind === "ITEM" && !itemIds.has(subject.id)) issue(["findings", index, "subjects"], "Item subjects must identify report items.");
     for (const evidence of finding.supportingEvidence) if (evidence.observation.kind === "room_furniture_scale"
       && evidence.observation.supportingItemIds.some((id) => !itemIds.has(id))) {

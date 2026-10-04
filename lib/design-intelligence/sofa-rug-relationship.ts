@@ -10,6 +10,7 @@ import type {
 
 export const SOFA_RUG_COMPATIBLE_WIDTH_RATIO = 0.75;
 export const SOFA_RUG_MIXED_WIDTH_RATIO = 0.6;
+export const SOFA_RUG_PROPORTION_RULE_ID = "sofa_rug_width_ratio";
 
 export type SofaRugRelationshipReason =
   | "relationship_not_sofa_rug"
@@ -40,6 +41,11 @@ export type SofaRugRelationshipEvaluation = {
   overallCompatibility: DesignCompatibility;
 };
 
+export type SofaRugScaleProportionEvaluation = Pick<
+  SofaRugRelationshipEvaluation,
+  "applicable" | "seatingRoleId" | "rugRoleId" | "scaleProportion"
+>;
+
 const SEATING_TYPES = new Set([
   "sofa",
   "loveseat",
@@ -57,7 +63,7 @@ function isFinitePositive(value: number | null): value is number {
   return value !== null && Number.isFinite(value) && value > 0;
 }
 
-function resolveRoles(first: DesignRole, second: DesignRole) {
+function resolveRoles(first: Pick<DesignRole, "roleId" | "furnitureTypeCode">, second: Pick<DesignRole, "roleId" | "furnitureTypeCode">) {
   if (
     SEATING_TYPES.has(first.furnitureTypeCode) &&
     RUG_TYPES.has(second.furnitureTypeCode)
@@ -81,13 +87,13 @@ function resolveRoles(first: DesignRole, second: DesignRole) {
   return null;
 }
 
-function evaluateScaleProportion(
-  seating: CatalogCandidate,
-  rug: CatalogCandidate,
+function evaluateScaleProportionWidths(
+  seatingWidthCm: number | null,
+  rugWidthCm: number | null,
 ): SofaRugDimensionEvaluation {
   if (
-    !isFinitePositive(seating.widthCm) ||
-    !isFinitePositive(rug.widthCm)
+    !isFinitePositive(seatingWidthCm) ||
+    !isFinitePositive(rugWidthCm)
   ) {
     return {
       compatibility: "unknown",
@@ -95,7 +101,7 @@ function evaluateScaleProportion(
     };
   }
 
-  const ratio = rug.widthCm / seating.widthCm;
+  const ratio = rugWidthCm / seatingWidthCm;
 
   if (ratio >= SOFA_RUG_COMPATIBLE_WIDTH_RATIO) {
     return {
@@ -115,6 +121,13 @@ function evaluateScaleProportion(
     compatibility: "incompatible",
     reasons: ["rug_width_too_small_for_seating"],
   };
+}
+
+function evaluateScaleProportion(
+  seating: CatalogCandidate,
+  rug: CatalogCandidate,
+): SofaRugDimensionEvaluation {
+  return evaluateScaleProportionWidths(seating.widthCm, rug.widthCm);
 }
 
 function evaluateColorHarmony(
@@ -184,6 +197,32 @@ function overallCompatibility(
   }
 
   return "unknown";
+}
+
+/** Width-only adapter for B.2.2; preserves the existing sofa/rug thresholds and reasons. */
+export function evaluateSofaRugScaleProportion(
+  firstRole: Pick<DesignRole, "roleId" | "furnitureTypeCode">,
+  firstWidthCm: number | null,
+  secondRole: Pick<DesignRole, "roleId" | "furnitureTypeCode">,
+  secondWidthCm: number | null,
+): SofaRugScaleProportionEvaluation {
+  const roles = resolveRoles(firstRole, secondRole);
+  if (!roles) {
+    return {
+      applicable: false,
+      seatingRoleId: null,
+      rugRoleId: null,
+      scaleProportion: { compatibility: "unknown", reasons: ["relationship_not_sofa_rug"] },
+    };
+  }
+  const seatingWidthCm = roles.seatingRole.roleId === firstRole.roleId ? firstWidthCm : secondWidthCm;
+  const rugWidthCm = roles.rugRole.roleId === firstRole.roleId ? firstWidthCm : secondWidthCm;
+  return {
+    applicable: true,
+    seatingRoleId: roles.seatingRole.roleId,
+    rugRoleId: roles.rugRole.roleId,
+    scaleProportion: evaluateScaleProportionWidths(seatingWidthCm, rugWidthCm),
+  };
 }
 
 export function evaluateSofaRugRelationship(
