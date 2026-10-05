@@ -217,6 +217,78 @@ export const aestheticEvidenceObservationSchema = z.discriminatedUnion("kind", [
     if ((observation.structuralStatus === "EXPLICIT_HIERARCHY") !== complete) context.addIssue({ code: "custom", path: ["structuralStatus"], message: "Structural status must reflect explicit E.10-A hierarchy coverage." });
   }),
   z.object({
+    kind: z.literal("rug_zone_structure"),
+    rugItemId: identifier,
+    groupId: identifier,
+    groupType: identifier,
+    rugGroupRoles: z.array(z.enum(["PRIMARY_ANCHOR", "SECONDARY_ANCHOR", "DEPENDENT"])),
+    groupZoneId: identifier.nullable(),
+    rugZoneId: identifier.nullable(),
+    groupZone: z.object({
+      zoneId: identifier,
+      type: identifier,
+      polygon: z.array(z.object({ id: identifier, xCm: z.number().finite(), yCm: z.number().finite() }).strict()).min(3),
+      center: z.object({ xCm: z.number().finite(), yCm: z.number().finite() }).strict(),
+      orientationDegrees: z.number().finite().nullable(),
+      polygonRelationToRoom: z.enum(["SAME_POLYGON", "DIFFERENT_POLYGON"]),
+    }).strict().nullable(),
+    rugZone: z.object({
+      zoneId: identifier,
+      type: identifier,
+      polygon: z.array(z.object({ id: identifier, xCm: z.number().finite(), yCm: z.number().finite() }).strict()).min(3),
+      center: z.object({ xCm: z.number().finite(), yCm: z.number().finite() }).strict(),
+      orientationDegrees: z.number().finite().nullable(),
+      polygonRelationToRoom: z.enum(["SAME_POLYGON", "DIFFERENT_POLYGON"]),
+    }).strict().nullable(),
+    zoneReferenceStatus: z.enum([
+      "MATCHED_ZONE", "DIFFERENT_ZONES", "GROUP_ZONE_MISSING", "RUG_ZONE_MISSING", "GROUP_ZONE_UNRESOLVED", "RUG_ZONE_UNRESOLVED",
+    ]),
+    placement: z.object({
+      mode: identifier.nullable(),
+      approximatePosition: z.object({ xCm: z.number().finite(), yCm: z.number().finite() }).nullable(),
+      preferredOrientationDegrees: z.number().finite().nullable(),
+    }).strict(),
+    dimensions: z.object({
+      planningRangeCm: z.object({
+        widthMin: z.number().finite().positive(), widthMax: z.number().finite().positive(),
+        depthMin: z.number().finite().positive(), depthMax: z.number().finite().positive(),
+      }).strict(),
+      catalogMeasurementsCm: z.object({ width: z.number().finite().positive().nullable(), depth: z.number().finite().positive().nullable() }).strict().nullable(),
+      designMeasurementsCm: z.object({ width: z.number().finite().positive().nullable(), depth: z.number().finite().positive().nullable() }).strict().nullable(),
+    }).strict(),
+    assessmentStatus: z.enum(["STRUCTURE_RECORDED", "INSUFFICIENT_EVIDENCE"]),
+    unavailableAssessments: z.array(z.enum([
+      "TRUE_ZONE_DEFINITION", "ZONE_QUALITY", "LIGHTNESS_RELATIONSHIP", "VISUAL_DOMINANCE",
+      "LEG_PLACEMENT", "PATTERN_INTENSITY", "RUG_FURNITURE_INTERSECTION_QUALITY", "FOOTPRINT_COVERAGE_JUDGMENT",
+    ])),
+  }).strict().superRefine((observation, context) => {
+    const { groupZone, rugZone, zoneReferenceStatus } = observation;
+    const expectedZoneStatus = observation.groupZoneId === null ? "GROUP_ZONE_MISSING"
+      : observation.rugZoneId === null ? "RUG_ZONE_MISSING"
+        : !groupZone ? "GROUP_ZONE_UNRESOLVED"
+          : !rugZone ? "RUG_ZONE_UNRESOLVED"
+            : observation.groupZoneId !== observation.rugZoneId ? "DIFFERENT_ZONES" : "MATCHED_ZONE";
+    if (zoneReferenceStatus !== expectedZoneStatus) context.addIssue({ code: "custom", path: ["zoneReferenceStatus"], message: "Zone association status must reflect E.10-A group/rug zone references." });
+    if ((groupZone !== null && observation.groupZoneId === null)
+      || (rugZone !== null && observation.rugZoneId === null)
+      || (groupZone && groupZone.zoneId !== observation.groupZoneId)
+      || (rugZone && rugZone.zoneId !== observation.rugZoneId)) {
+      context.addIssue({ code: "custom", path: ["groupZone"], message: "Resolved zone evidence must match its authoritative zone ID." });
+    }
+    const expectedAssessment = groupZone && rugZone ? "STRUCTURE_RECORDED" : "INSUFFICIENT_EVIDENCE";
+    if (observation.assessmentStatus !== expectedAssessment) context.addIssue({ code: "custom", path: ["assessmentStatus"], message: "Missing group or rug zone evidence must remain insufficient." });
+    if (observation.dimensions.planningRangeCm.widthMax < observation.dimensions.planningRangeCm.widthMin
+      || observation.dimensions.planningRangeCm.depthMax < observation.dimensions.planningRangeCm.depthMin) {
+      context.addIssue({ code: "custom", path: ["dimensions", "planningRangeCm"], message: "Planning dimension ranges must be ordered." });
+    }
+    if (observation.rugGroupRoles.some((role, index) => index > 0 && observation.rugGroupRoles[index - 1] > role)) {
+      context.addIssue({ code: "custom", path: ["rugGroupRoles"], message: "Rug group roles must be canonically ordered." });
+    }
+    if (new Set(observation.unavailableAssessments).size !== observation.unavailableAssessments.length) {
+      context.addIssue({ code: "custom", path: ["unavailableAssessments"], message: "Unavailable assessments must be unique." });
+    }
+  }),
+  z.object({
     kind: z.literal("item_color_harmony"),
     itemId: identifier,
     color: aestheticColorSchema.nullable(),
@@ -496,8 +568,8 @@ const evidenceSchema = z.object({
   if ((evidence.source === "design_intent") !== (evidence.observation.kind === "design_intent")) {
     context.addIssue({ code: "custom", path: ["observation"], message: "Design-intent sources require a design-intent observation, and vice versa." });
   }
-  if ((evidence.source === "e10a_plan") !== (evidence.observation.kind === "furniture_group_composition")) {
-    context.addIssue({ code: "custom", path: ["observation"], message: "E.10-A group sources require a furniture-group composition observation, and vice versa." });
+  if ((evidence.source === "e10a_plan") !== (evidence.observation.kind === "furniture_group_composition" || evidence.observation.kind === "rug_zone_structure")) {
+    context.addIssue({ code: "custom", path: ["observation"], message: "E.10-A plan sources require a group or rug-zone structure observation, and vice versa." });
   }
   if ((evidence.source === "measured_dimensions") !== (evidence.observation.kind === "measurement" || evidence.observation.kind === "room_furniture_scale" || evidence.observation.kind === "furniture_proportion")) {
     context.addIssue({ code: "custom", path: ["observation"], message: "Measured-dimension sources require a measurement observation, and vice versa." });
@@ -563,6 +635,7 @@ export const aestheticFindingSchema = z.object({
   for (const evidence of finding.supportingEvidence) {
     const evidenceItems = evidence.observation.kind === "design_intent" ? []
       : evidence.observation.kind === "furniture_group_composition" ? evidence.observation.members.map((member) => member.itemId)
+      : evidence.observation.kind === "rug_zone_structure" ? [evidence.observation.rugItemId]
       : evidence.observation.kind === "item_color_harmony" ? [evidence.observation.itemId]
       : evidence.observation.kind === "pair_color_harmony" ? evidence.observation.pairItems.map((item) => item.itemId)
       : evidence.observation.kind === "item_material_harmony" ? [evidence.observation.itemId]
@@ -587,6 +660,19 @@ export const aestheticFindingSchema = z.object({
       }
       if (evidence.itemIds.length !== memberIds.length || memberIds.some((id) => !evidence.itemIds.includes(id))) {
         issue(["supportingEvidence"], "Group-composition evidence must identify exactly the group members.");
+      }
+    }
+    if (observation.kind === "rug_zone_structure") {
+      if (finding.target.kind !== "dimension" || finding.target.dimension !== "rug_zone_coherence"
+        || finding.itemIds.length !== 1 || finding.itemIds[0] !== observation.rugItemId
+        || !finding.subjects.some((subject) => subject.kind === "GROUP" && subject.id === observation.groupId)
+        || finding.compatibility !== "unknown" || finding.impact !== "NEUTRAL" || finding.recommendationCategory !== null) {
+        issue(["supportingEvidence"], "Rug-zone structure evidence must remain a neutral, non-recommendation inventory for its rug and E.10-A group.");
+      }
+      const expectedCoverage = observation.assessmentStatus === "STRUCTURE_RECORDED" ? "NOT_EVALUATED" : "INSUFFICIENT_EVIDENCE";
+      if (finding.coverage.status !== expectedCoverage) issue(["coverage"], "Rug-zone structural evidence must not claim aesthetic quality evaluation.");
+      if (evidence.itemIds.length !== 1 || evidence.itemIds[0] !== observation.rugItemId) {
+        issue(["supportingEvidence"], "Rug-zone evidence must identify exactly the evaluated rug item.");
       }
     }
     if (observation.kind === "room_furniture_scale") {
