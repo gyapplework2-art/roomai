@@ -289,6 +289,67 @@ export const aestheticEvidenceObservationSchema = z.discriminatedUnion("kind", [
     }
   }),
   z.object({
+    kind: z.literal("lighting_composition_structure"),
+    lightingItemId: identifier,
+    semanticRole: z.enum(["TASK_LIGHTING", "AMBIENT_LIGHTING"]),
+    planCategory: identifier,
+    planSubtype: identifier.nullable(),
+    groupMemberships: z.array(z.object({
+      groupId: identifier,
+      groupType: identifier,
+      groupZoneId: identifier.nullable(),
+      hierarchyRoles: z.array(z.enum(["PRIMARY_ANCHOR", "SECONDARY_ANCHOR", "DEPENDENT"])),
+    }).strict()),
+    zoneId: identifier.nullable(),
+    zoneResolutionStatus: z.enum(["NO_ZONE_REFERENCE", "RESOLVED", "UNRESOLVED", "AMBIGUOUS"]),
+    zone: z.object({
+      zoneId: identifier,
+      type: identifier,
+      polygon: z.array(z.object({ id: identifier, xCm: z.number().finite(), yCm: z.number().finite() }).strict()).min(3),
+      center: z.object({ xCm: z.number().finite(), yCm: z.number().finite() }).strict(),
+      orientationDegrees: z.number().finite().nullable(),
+    }).strict().nullable(),
+    placement: z.object({
+      mode: identifier.nullable(),
+      approximatePosition: z.object({ xCm: z.number().finite(), yCm: z.number().finite() }).nullable(),
+      preferredOrientationDegrees: z.number().finite().nullable(),
+    }).strict(),
+    explicitRelationships: z.array(z.object({
+      direction: z.enum(["OUTGOING", "INCOMING"]),
+      sourceItemId: identifier,
+      relationshipType: identifier,
+      targetItemId: identifier,
+    }).strict()),
+    assessmentStatus: z.literal("EVIDENCE_RECORDED"),
+    unavailableAssessments: z.array(z.enum([
+      "FIXTURE_TYPE_CLASSIFICATION", "FIXTURE_MOUNTING_TYPE", "PHOTOMETRIC_ADEQUACY", "BRIGHTNESS_LEVEL",
+      "COLOR_TEMPERATURE", "CRI_QUALITY", "DIMMABILITY", "LIGHT_DIRECTION", "BEAM_COVERAGE", "SHADE_DIFFUSION",
+      "VERTICAL_RELATIONSHIP", "TASK_PERFORMANCE", "AMBIENT_COVERAGE", "ACCENT_LIGHTING_CLASSIFICATION", "FIXTURE_SCALE_RELATIONSHIP",
+    ])),
+  }).strict().superRefine((observation, context) => {
+    const expectedZoneStatus = observation.zoneId === null ? "NO_ZONE_REFERENCE"
+      : observation.zone !== null ? "RESOLVED"
+        : observation.zoneResolutionStatus === "AMBIGUOUS" ? "AMBIGUOUS" : "UNRESOLVED";
+    if (observation.zoneResolutionStatus !== expectedZoneStatus
+      || (observation.zone !== null && observation.zone.zoneId !== observation.zoneId)) {
+      context.addIssue({ code: "custom", path: ["zoneResolutionStatus"], message: "Zone resolution must match the explicit item zone reference." });
+    }
+    if (observation.groupMemberships.some((membership, index) => index > 0 && observation.groupMemberships[index - 1].groupId >= membership.groupId)) {
+      context.addIssue({ code: "custom", path: ["groupMemberships"], message: "Lighting group memberships must be unique and ordered by group ID." });
+    }
+    if (observation.groupMemberships.some((membership) => membership.hierarchyRoles.some((role, index) => index > 0 && membership.hierarchyRoles[index - 1] > role))) {
+      context.addIssue({ code: "custom", path: ["groupMemberships"], message: "Group hierarchy roles must be canonically ordered." });
+    }
+    const relationKey = (relationship: typeof observation.explicitRelationships[number]) => `${relationship.direction}:${relationship.sourceItemId}:${relationship.relationshipType}:${relationship.targetItemId}`;
+    if (observation.explicitRelationships.some((relationship, index) => index > 0 && relationKey(observation.explicitRelationships[index - 1]) >= relationKey(relationship))) {
+      context.addIssue({ code: "custom", path: ["explicitRelationships"], message: "Explicit lighting relationships must be unique and canonically ordered." });
+    }
+    if (observation.explicitRelationships.some((relationship) => relationship.direction === "OUTGOING"
+      ? relationship.sourceItemId !== observation.lightingItemId : relationship.targetItemId !== observation.lightingItemId)) {
+      context.addIssue({ code: "custom", path: ["explicitRelationships"], message: "Recorded relationship direction must reference the evaluated lighting item." });
+    }
+  }),
+  z.object({
     kind: z.literal("item_color_harmony"),
     itemId: identifier,
     color: aestheticColorSchema.nullable(),
@@ -568,7 +629,7 @@ const evidenceSchema = z.object({
   if ((evidence.source === "design_intent") !== (evidence.observation.kind === "design_intent")) {
     context.addIssue({ code: "custom", path: ["observation"], message: "Design-intent sources require a design-intent observation, and vice versa." });
   }
-  if ((evidence.source === "e10a_plan") !== (evidence.observation.kind === "furniture_group_composition" || evidence.observation.kind === "rug_zone_structure")) {
+  if ((evidence.source === "e10a_plan") !== (evidence.observation.kind === "furniture_group_composition" || evidence.observation.kind === "rug_zone_structure" || evidence.observation.kind === "lighting_composition_structure")) {
     context.addIssue({ code: "custom", path: ["observation"], message: "E.10-A plan sources require a group or rug-zone structure observation, and vice versa." });
   }
   if ((evidence.source === "measured_dimensions") !== (evidence.observation.kind === "measurement" || evidence.observation.kind === "room_furniture_scale" || evidence.observation.kind === "furniture_proportion")) {
@@ -636,6 +697,7 @@ export const aestheticFindingSchema = z.object({
     const evidenceItems = evidence.observation.kind === "design_intent" ? []
       : evidence.observation.kind === "furniture_group_composition" ? evidence.observation.members.map((member) => member.itemId)
       : evidence.observation.kind === "rug_zone_structure" ? [evidence.observation.rugItemId]
+      : evidence.observation.kind === "lighting_composition_structure" ? [evidence.observation.lightingItemId]
       : evidence.observation.kind === "item_color_harmony" ? [evidence.observation.itemId]
       : evidence.observation.kind === "pair_color_harmony" ? evidence.observation.pairItems.map((item) => item.itemId)
       : evidence.observation.kind === "item_material_harmony" ? [evidence.observation.itemId]
@@ -673,6 +735,22 @@ export const aestheticFindingSchema = z.object({
       if (finding.coverage.status !== expectedCoverage) issue(["coverage"], "Rug-zone structural evidence must not claim aesthetic quality evaluation.");
       if (evidence.itemIds.length !== 1 || evidence.itemIds[0] !== observation.rugItemId) {
         issue(["supportingEvidence"], "Rug-zone evidence must identify exactly the evaluated rug item.");
+      }
+    }
+    if (observation.kind === "lighting_composition_structure") {
+      const groupIds = observation.groupMemberships.map((membership) => membership.groupId);
+      if (finding.target.kind !== "dimension" || finding.target.dimension !== "lighting_composition"
+        || finding.itemIds.length !== 1 || finding.itemIds[0] !== observation.lightingItemId
+        || finding.subjects.some((subject) => subject.kind === "GROUP" && !groupIds.includes(subject.id))
+        || groupIds.some((groupId) => !finding.subjects.some((subject) => subject.kind === "GROUP" && subject.id === groupId))) {
+        issue(["supportingEvidence"], "Lighting structure evidence must match its lighting item and explicit group subjects.");
+      }
+      if (finding.coverage.status !== "NOT_EVALUATED" || finding.compatibility !== "unknown" || finding.impact !== "NEUTRAL"
+        || finding.priority !== "P3" || finding.recommendationCategory !== null) {
+        issue(["coverage"], "Lighting role/placement evidence is not a performance or quality judgment and cannot create a recommendation.");
+      }
+      if (evidence.itemIds.length !== 1 || evidence.itemIds[0] !== observation.lightingItemId) {
+        issue(["supportingEvidence"], "Lighting structure evidence must identify exactly the evaluated lighting item.");
       }
     }
     if (observation.kind === "room_furniture_scale") {
