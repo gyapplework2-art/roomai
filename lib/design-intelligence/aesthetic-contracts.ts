@@ -174,6 +174,49 @@ const evidenceValueSchema = z.union([z.string(), z.number().finite(), z.boolean(
 export const aestheticEvidenceObservationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("design_intent"), preference: z.enum(["STYLE", "COLOR", "MATERIAL", "TEXTURE", "HEIGHT_VARIATION", "FORM_VARIATION"]), values: z.array(evidenceValueSchema).min(1) }).strict(),
   z.object({
+    kind: z.literal("furniture_group_composition"),
+    groupId: identifier,
+    groupType: identifier,
+    primaryAnchorItemId: identifier.nullable(),
+    secondaryAnchorItemIds: z.array(identifier),
+    dependentItemIds: z.array(identifier),
+    members: z.array(z.object({
+      itemId: identifier,
+      semanticRole: furnitureRoleSchema.nullable(),
+      category: identifier,
+      subtype: identifier.nullable(),
+      groupRoles: z.array(z.enum(["PRIMARY_ANCHOR", "SECONDARY_ANCHOR", "DEPENDENT"])),
+      relationships: z.array(z.object({ type: identifier, targetItemId: identifier }).strict()),
+    }).strict()),
+    structuralStatus: z.enum(["EXPLICIT_HIERARCHY", "PARTIAL_HIERARCHY"]),
+    templateConformance: z.literal("NOT_EVALUATED"),
+    visualQuality: z.literal("NOT_EVALUATED"),
+    unavailableAssessments: z.array(z.enum(["TEMPLATE_CONFORMANCE", "VISUAL_BALANCE", "SYMMETRY", "DOMINANCE", "COMPOSITION_QUALITY"])),
+  }).strict().superRefine((observation, context) => {
+    const memberIds = observation.members.map((member) => member.itemId);
+    if (new Set(memberIds).size !== memberIds.length || memberIds.some((id, index) => index > 0 && memberIds[index - 1] > id)) {
+      context.addIssue({ code: "custom", path: ["members"], message: "Group members must be unique and canonically ordered." });
+    }
+    const memberIdSet = new Set(memberIds);
+    for (const [index, member] of observation.members.entries()) {
+      if (member.groupRoles.some((role, roleIndex) => roleIndex > 0 && member.groupRoles[roleIndex - 1] > role)) {
+        context.addIssue({ code: "custom", path: ["members", index, "groupRoles"], message: "Member hierarchy roles must use canonical ordering." });
+      }
+      if (member.relationships.some((relationship, relationshipIndex) => relationshipIndex > 0
+        && `${member.relationships[relationshipIndex - 1].type}:${member.relationships[relationshipIndex - 1].targetItemId}` > `${relationship.type}:${relationship.targetItemId}`)) {
+        context.addIssue({ code: "custom", path: ["members", index, "relationships"], message: "Member relationships must use canonical ordering." });
+      }
+    }
+    const hierarchyReferences = [observation.primaryAnchorItemId, ...observation.secondaryAnchorItemIds, ...observation.dependentItemIds]
+      .filter((id): id is string => id !== null);
+    const complete = observation.primaryAnchorItemId !== null && memberIdSet.has(observation.primaryAnchorItemId)
+      && new Set(observation.secondaryAnchorItemIds).size === observation.secondaryAnchorItemIds.length
+      && new Set(observation.dependentItemIds).size === observation.dependentItemIds.length
+      && hierarchyReferences.every((id) => memberIdSet.has(id))
+      && observation.members.every((member) => member.groupRoles.length === 1);
+    if ((observation.structuralStatus === "EXPLICIT_HIERARCHY") !== complete) context.addIssue({ code: "custom", path: ["structuralStatus"], message: "Structural status must reflect explicit E.10-A hierarchy coverage." });
+  }),
+  z.object({
     kind: z.literal("item_color_harmony"),
     itemId: identifier,
     color: aestheticColorSchema.nullable(),
@@ -442,16 +485,19 @@ export const aestheticEvidenceObservationSchema = z.discriminatedUnion("kind", [
 
 const evidenceSchema = z.object({
   evidenceId: evidenceIdentifier,
-  source: z.enum(["design_intent", "normalized_attributes", "measured_dimensions", "explicit_visual_observation"]),
+  source: z.enum(["design_intent", "normalized_attributes", "measured_dimensions", "explicit_visual_observation", "e10a_plan"]),
   dimension: aestheticDimensionSchema,
   itemIds: distinctItemIds,
   description: explanation,
   observation: aestheticEvidenceObservationSchema,
-}).strict().refine((evidence) => evidence.source === "design_intent" || evidence.itemIds.length > 0, {
+}).strict().refine((evidence) => evidence.source === "design_intent" || evidence.source === "e10a_plan" || evidence.itemIds.length > 0, {
   path: ["itemIds"], message: "Observed or measured evidence must identify affected items.",
 }).superRefine((evidence, context) => {
   if ((evidence.source === "design_intent") !== (evidence.observation.kind === "design_intent")) {
     context.addIssue({ code: "custom", path: ["observation"], message: "Design-intent sources require a design-intent observation, and vice versa." });
+  }
+  if ((evidence.source === "e10a_plan") !== (evidence.observation.kind === "furniture_group_composition")) {
+    context.addIssue({ code: "custom", path: ["observation"], message: "E.10-A group sources require a furniture-group composition observation, and vice versa." });
   }
   if ((evidence.source === "measured_dimensions") !== (evidence.observation.kind === "measurement" || evidence.observation.kind === "room_furniture_scale" || evidence.observation.kind === "furniture_proportion")) {
     context.addIssue({ code: "custom", path: ["observation"], message: "Measured-dimension sources require a measurement observation, and vice versa." });
@@ -516,6 +562,7 @@ export const aestheticFindingSchema = z.object({
   }
   for (const evidence of finding.supportingEvidence) {
     const evidenceItems = evidence.observation.kind === "design_intent" ? []
+      : evidence.observation.kind === "furniture_group_composition" ? evidence.observation.members.map((member) => member.itemId)
       : evidence.observation.kind === "item_color_harmony" ? [evidence.observation.itemId]
       : evidence.observation.kind === "pair_color_harmony" ? evidence.observation.pairItems.map((item) => item.itemId)
       : evidence.observation.kind === "item_material_harmony" ? [evidence.observation.itemId]
@@ -527,6 +574,21 @@ export const aestheticFindingSchema = z.object({
       : evidence.observation.subjectIds;
     if (evidenceItems.some((id) => !finding.itemIds.includes(id))) issue(["supportingEvidence"], "Structured evidence subjects must be affected item IDs.");
     const observation = evidence.observation;
+    if (observation.kind === "furniture_group_composition") {
+      const memberIds = observation.members.map((member) => member.itemId);
+      if (finding.target.kind !== "dimension" || finding.target.dimension !== "composition"
+        || JSON.stringify(memberIds) !== JSON.stringify([...finding.itemIds].sort())
+        || !finding.subjects.some((subject) => subject.kind === "GROUP" && subject.id === observation.groupId)) {
+        issue(["supportingEvidence"], "Group-composition evidence must match its group and all member items.");
+      }
+      if (finding.coverage.status !== "EVALUATED" || finding.compatibility !== "unknown" || finding.impact !== "NEUTRAL"
+        || finding.recommendationCategory !== null) {
+        issue(["coverage"], "Structural group inventory is neutral evidence, not a visual-quality judgment or recommendation.");
+      }
+      if (evidence.itemIds.length !== memberIds.length || memberIds.some((id) => !evidence.itemIds.includes(id))) {
+        issue(["supportingEvidence"], "Group-composition evidence must identify exactly the group members.");
+      }
+    }
     if (observation.kind === "room_furniture_scale") {
       const hasRoomSubject = finding.subjects.some((subject) => subject.kind === "ROOM" && subject.id === observation.roomId);
       if (finding.target.dimension !== "scale_proportion" || !finding.itemIds.includes(observation.itemId) || !hasRoomSubject) {
