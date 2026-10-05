@@ -11,12 +11,13 @@ import {
 const compareText = (first: string, second: string) => first < second ? -1 : first > second ? 1 : 0;
 const impactOrder = { MAJOR_ISSUE: 0, MODERATE_ISSUE: 1, MINOR_ISSUE: 2, POSITIVE: 3, NEUTRAL: 4 } as const;
 const priorityOrder = { P2: 0, P3: 1 } as const;
+const dimensionOrder = new Map(aestheticDimensions.map((dimension, index) => [dimension, index]));
 
 /** P2 precedes P3; stable semantic fields break ties without using array arrival order. */
 export function compareAestheticFindings(first: AestheticFinding, second: AestheticFinding): number {
   return priorityOrder[first.priority] - priorityOrder[second.priority]
     || impactOrder[first.impact] - impactOrder[second.impact]
-    || compareText(first.target.dimension, second.target.dimension)
+    || dimensionOrder.get(first.target.dimension)! - dimensionOrder.get(second.target.dimension)!
     || compareText(first.evaluator.ruleId, second.evaluator.ruleId)
     || compareText(first.findingId, second.findingId);
 }
