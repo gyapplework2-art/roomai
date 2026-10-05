@@ -208,6 +208,42 @@ export const aestheticEvidenceObservationSchema = z.discriminatedUnion("kind", [
     }
   }),
   z.object({
+    kind: z.literal("functional_relationship_observation"),
+    relationshipType: z.enum(["dining_table_chair", "bed_nightstand", "desk_office_chair"]),
+    pairItems: z.array(z.object({
+      itemId: identifier,
+      semanticRole: furnitureRoleSchema.nullable(),
+      category: identifier,
+      subtype: identifier.nullable(),
+      heightCm: z.number().finite().positive().nullable(),
+      heightSource: z.enum(["catalog", "design_object"]).nullable(),
+      seatingCapacity: z.number().int().positive().nullable(),
+    }).strict()).length(2),
+    relationshipSources: z.array(z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("E10A_GROUP"), groupId: identifier }).strict(),
+      z.object({ kind: z.literal("SEMANTIC_RELATIONSHIP"), relationshipType: z.literal("GROUPED_WITH") }).strict(),
+    ])).min(1),
+    sourceEvaluatorId: z.enum(["dining-table-chair-relationship", "bed-nightstand-relationship", "desk-office-chair-relationship"]),
+    compatibility: z.literal("unknown"),
+    reasons: z.array(z.enum([
+      "table_seating_capacity_known", "table_seating_capacity_missing_or_invalid", "chair_count_not_represented_by_candidate",
+      "bed_sleeping_surface_height_not_represented", "nightstand_height_known_but_not_comparable_to_bed_total_height", "bedside_height_alignment_unknown",
+      "office_chair_seat_height_not_exposed", "office_chair_seat_depth_not_exposed", "office_chair_arm_clearance_not_exposed",
+      "desk_underside_clearance_not_exposed", "adjustable_height_attributes_not_exposed", "ergonomic_fit_unknown",
+    ])).min(1),
+  }).strict().superRefine((observation, context) => {
+    const itemIds = observation.pairItems.map((item) => item.itemId);
+    if (itemIds[0] >= itemIds[1]) context.addIssue({ code: "custom", path: ["pairItems"], message: "Functional relationship pair IDs must be distinct and canonically ordered." });
+    if (observation.pairItems.some((item) => (item.heightCm === null) !== (item.heightSource === null))) context.addIssue({ code: "custom", path: ["pairItems"], message: "Height provenance must match known height evidence." });
+    const sourceKeys = observation.relationshipSources.map((source) => source.kind === "E10A_GROUP" ? `${source.kind}:${source.groupId}` : source.kind);
+    if (new Set(sourceKeys).size !== sourceKeys.length || sourceKeys.some((key, index) => index > 0 && sourceKeys[index - 1] > key)) {
+      context.addIssue({ code: "custom", path: ["relationshipSources"], message: "Functional relationship sources must be unique and canonically ordered." });
+    }
+    const expectedEvaluator = observation.relationshipType === "dining_table_chair" ? "dining-table-chair-relationship"
+      : observation.relationshipType === "bed_nightstand" ? "bed-nightstand-relationship" : "desk-office-chair-relationship";
+    if (observation.sourceEvaluatorId !== expectedEvaluator) context.addIssue({ code: "custom", path: ["sourceEvaluatorId"], message: "Source evaluator must match the existing supported relationship type." });
+  }),
+  z.object({
     kind: z.literal("furniture_group_composition"),
     groupId: identifier,
     groupType: identifier,
@@ -663,7 +699,7 @@ const evidenceSchema = z.object({
   if ((evidence.source === "design_intent") !== (evidence.observation.kind === "design_intent")) {
     context.addIssue({ code: "custom", path: ["observation"], message: "Design-intent sources require a design-intent observation, and vice versa." });
   }
-  if ((evidence.source === "e10a_plan") !== (evidence.observation.kind === "furniture_group_composition" || evidence.observation.kind === "rug_zone_structure" || evidence.observation.kind === "lighting_composition_structure")) {
+  if ((evidence.source === "e10a_plan") !== (evidence.observation.kind === "furniture_group_composition" || evidence.observation.kind === "rug_zone_structure" || evidence.observation.kind === "lighting_composition_structure" || evidence.observation.kind === "functional_relationship_observation")) {
     context.addIssue({ code: "custom", path: ["observation"], message: "E.10-A plan sources require a group or rug-zone structure observation, and vice versa." });
   }
   if ((evidence.source === "measured_dimensions") !== (evidence.observation.kind === "measurement" || evidence.observation.kind === "room_furniture_scale" || evidence.observation.kind === "furniture_proportion")) {
@@ -736,6 +772,7 @@ export const aestheticFindingSchema = z.object({
       : evidence.observation.kind === "furniture_group_composition" ? evidence.observation.members.map((member) => member.itemId)
       : evidence.observation.kind === "rug_zone_structure" ? [evidence.observation.rugItemId]
       : evidence.observation.kind === "lighting_composition_structure" ? [evidence.observation.lightingItemId]
+      : evidence.observation.kind === "functional_relationship_observation" ? evidence.observation.pairItems.map((item) => item.itemId)
       : evidence.observation.kind === "item_color_harmony" ? [evidence.observation.itemId]
       : evidence.observation.kind === "pair_color_harmony" ? evidence.observation.pairItems.map((item) => item.itemId)
       : evidence.observation.kind === "item_material_harmony" ? [evidence.observation.itemId]
@@ -802,6 +839,19 @@ export const aestheticFindingSchema = z.object({
       }
       if (evidence.itemIds.length !== 1 || evidence.itemIds[0] !== observation.lightingItemId) {
         issue(["supportingEvidence"], "Lighting structure evidence must identify exactly the evaluated lighting item.");
+      }
+    }
+    if (observation.kind === "functional_relationship_observation") {
+      const pairItemIds = observation.pairItems.map((item) => item.itemId);
+      if (finding.target.kind !== "relationship" || finding.target.dimension !== "functional_relationship"
+        || finding.target.relationshipType !== observation.relationshipType
+        || JSON.stringify(pairItemIds) !== JSON.stringify([...finding.itemIds].sort())
+        || finding.compatibility !== "unknown" || finding.coverage.status !== "NOT_EVALUATED"
+        || finding.impact !== "NEUTRAL" || finding.priority !== "P3" || finding.recommendationCategory !== null) {
+        issue(["supportingEvidence"], "Existing functional relationship evidence must remain unknown, not evaluated, neutral, and recommendation-free.");
+      }
+      if (evidence.itemIds.length !== pairItemIds.length || pairItemIds.some((id) => !evidence.itemIds.includes(id))) {
+        issue(["supportingEvidence"], "Functional relationship evidence must identify exactly both explicit pair members.");
       }
     }
     if (observation.kind === "room_furniture_scale") {

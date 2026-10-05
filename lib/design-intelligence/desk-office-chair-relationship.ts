@@ -128,7 +128,7 @@ function evaluateScaleProportion(
   };
 }
 
-function evaluateFunctionalRelationship(): DeskOfficeChairDimensionEvaluation {
+export function evaluateDeskOfficeChairFunctionalRelationship(): DeskOfficeChairDimensionEvaluation {
   return {
     compatibility: "unknown",
     reasons: [
@@ -217,7 +217,7 @@ export function evaluateDeskOfficeChairRelationship(
     resolved.chairCandidate,
   );
 
-  const functionalRelationship = evaluateFunctionalRelationship();
+  const functionalRelationship = evaluateDeskOfficeChairFunctionalRelationship();
 
   const colorHarmony = evaluateColorHarmony(
     resolved.deskCandidate,

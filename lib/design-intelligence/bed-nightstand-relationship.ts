@@ -124,14 +124,14 @@ function evaluateScaleProportion(
   };
 }
 
-function evaluateFunctionalRelationship(
-  nightstand: CatalogCandidate,
+export function evaluateBedNightstandFunctionalRelationship(
+  nightstandHeightCm: number | null,
 ): BedNightstandDimensionEvaluation {
   const reasons: BedNightstandReason[] = [
     "bed_sleeping_surface_height_not_represented",
   ];
 
-  if (isPositiveFinite(nightstand.heightCm)) {
+  if (isPositiveFinite(nightstandHeightCm)) {
     reasons.push(
       "nightstand_height_known_but_not_comparable_to_bed_total_height",
     );
@@ -143,6 +143,10 @@ function evaluateFunctionalRelationship(
     compatibility: "unknown",
     reasons,
   };
+}
+
+function evaluateFunctionalRelationship(nightstand: CatalogCandidate): BedNightstandDimensionEvaluation {
+  return evaluateBedNightstandFunctionalRelationship(nightstand.heightCm);
 }
 
 function evaluateColorHarmony(

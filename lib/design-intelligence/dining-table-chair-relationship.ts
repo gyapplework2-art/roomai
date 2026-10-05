@@ -129,8 +129,8 @@ function evaluateScaleProportion(
   };
 }
 
-function evaluateFunctionalRelationship(
-  table: CatalogCandidate,
+export function evaluateDiningTableChairFunctionalRelationship(
+  table: Pick<CatalogCandidate, "seatingCapacity">,
 ): DiningRelationshipDimensionEvaluation {
   if (
     table.seatingCapacity !== null &&
@@ -230,7 +230,7 @@ export function evaluateDiningTableChairRelationship(
     resolved.chairCandidate,
   );
 
-  const functionalRelationship = evaluateFunctionalRelationship(
+  const functionalRelationship = evaluateDiningTableChairFunctionalRelationship(
     resolved.tableCandidate,
   );
 
