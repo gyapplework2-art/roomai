@@ -174,6 +174,40 @@ const evidenceValueSchema = z.union([z.string(), z.number().finite(), z.boolean(
 export const aestheticEvidenceObservationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("design_intent"), preference: z.enum(["STYLE", "COLOR", "MATERIAL", "TEXTURE", "HEIGHT_VARIATION", "FORM_VARIATION"]), values: z.array(evidenceValueSchema).min(1) }).strict(),
   z.object({
+    kind: z.literal("item_style_harmony"),
+    itemId: identifier,
+    styleCode: aestheticStyleCodeSchema.nullable(),
+    styleSource: z.enum(["catalog", "design_object", "normalized_attributes"]).nullable(),
+    stylePreferences: z.array(z.object({ role: z.enum(["primary", "secondary"]), styleCode: aestheticStyleCodeSchema }).strict()),
+    matchedPreferenceRole: z.enum(["primary", "secondary"]).nullable(),
+    alignment: z.enum(["MATCHES_PRIMARY", "MATCHES_SECONDARY", "ADJACENT_TO_PRIMARY", "ADJACENT_TO_SECONDARY", "VALID_BUT_NOT_ALIGNED", "UNKNOWN"]),
+    compatibility: designCompatibilitySchema,
+    reasons: z.array(z.enum([
+      "candidate_style_missing", "candidate_style_unknown", "design_style_intent_missing",
+      "candidate_matches_primary_style", "candidate_matches_secondary_style",
+      "candidate_adjacent_to_primary_style", "candidate_adjacent_to_secondary_style",
+      "candidate_style_valid_but_not_aligned",
+    ])).length(1),
+  }).strict().superRefine((observation, context) => {
+    if ((observation.styleCode === null) !== (observation.styleSource === null)) context.addIssue({ code: "custom", path: ["styleSource"], message: "Style provenance must match normalized style availability." });
+    const reason = observation.reasons[0];
+    const alignment = reason === "candidate_matches_primary_style" ? "MATCHES_PRIMARY"
+      : reason === "candidate_matches_secondary_style" ? "MATCHES_SECONDARY"
+        : reason === "candidate_adjacent_to_primary_style" ? "ADJACENT_TO_PRIMARY"
+          : reason === "candidate_adjacent_to_secondary_style" ? "ADJACENT_TO_SECONDARY"
+            : reason === "candidate_style_valid_but_not_aligned" ? "VALID_BUT_NOT_ALIGNED" : "UNKNOWN";
+    const matchedRole = alignment === "MATCHES_PRIMARY" || alignment === "ADJACENT_TO_PRIMARY" ? "primary"
+      : alignment === "MATCHES_SECONDARY" || alignment === "ADJACENT_TO_SECONDARY" ? "secondary" : null;
+    const expectedCompatibility = alignment === "MATCHES_PRIMARY" || alignment === "MATCHES_SECONDARY"
+      || alignment === "ADJACENT_TO_PRIMARY" || alignment === "ADJACENT_TO_SECONDARY" ? "compatible"
+      : alignment === "VALID_BUT_NOT_ALIGNED" ? "mixed" : "unknown";
+    if (observation.alignment !== alignment || observation.matchedPreferenceRole !== matchedRole) context.addIssue({ code: "custom", path: ["alignment"], message: "Style alignment must preserve the existing style evaluator result." });
+    if (observation.compatibility !== expectedCompatibility) context.addIssue({ code: "custom", path: ["compatibility"], message: "Style compatibility must preserve the existing style evaluator result." });
+    for (const [index, preference] of observation.stylePreferences.entries()) {
+      if (index > 0 && observation.stylePreferences[index - 1].role >= preference.role) context.addIssue({ code: "custom", path: ["stylePreferences"], message: "Style preferences must be unique and canonically ordered." });
+    }
+  }),
+  z.object({
     kind: z.literal("furniture_group_composition"),
     groupId: identifier,
     groupType: identifier,
@@ -639,6 +673,9 @@ const evidenceSchema = z.object({
     && evidence.source !== "normalized_attributes") {
     context.addIssue({ code: "custom", path: ["source"], message: "Normalized color evidence must use its normalized-attribute source." });
   }
+  if (evidence.observation.kind === "item_style_harmony" && evidence.source !== "normalized_attributes") {
+    context.addIssue({ code: "custom", path: ["source"], message: "Normalized style evidence must use its normalized-attribute source." });
+  }
   if ((evidence.observation.kind === "item_material_harmony" || evidence.observation.kind === "pair_material_harmony" || evidence.observation.kind === "pair_texture_harmony")
     && evidence.source !== "normalized_attributes") {
     context.addIssue({ code: "custom", path: ["source"], message: "Material and texture observations must use their normalized-attribute evidence source." });
@@ -695,6 +732,7 @@ export const aestheticFindingSchema = z.object({
   }
   for (const evidence of finding.supportingEvidence) {
     const evidenceItems = evidence.observation.kind === "design_intent" ? []
+      : evidence.observation.kind === "item_style_harmony" ? [evidence.observation.itemId]
       : evidence.observation.kind === "furniture_group_composition" ? evidence.observation.members.map((member) => member.itemId)
       : evidence.observation.kind === "rug_zone_structure" ? [evidence.observation.rugItemId]
       : evidence.observation.kind === "lighting_composition_structure" ? [evidence.observation.lightingItemId]
@@ -709,6 +747,19 @@ export const aestheticFindingSchema = z.object({
       : evidence.observation.subjectIds;
     if (evidenceItems.some((id) => !finding.itemIds.includes(id))) issue(["supportingEvidence"], "Structured evidence subjects must be affected item IDs.");
     const observation = evidence.observation;
+    if (observation.kind === "item_style_harmony") {
+      if (finding.target.kind !== "dimension" || finding.target.dimension !== "style_harmony"
+        || finding.itemIds.length !== 1 || finding.itemIds[0] !== observation.itemId
+        || finding.compatibility !== observation.compatibility) {
+        issue(["supportingEvidence"], "Item style evidence must match a single-item style-harmony finding and preserve compatibility.");
+      }
+      const expectedImpact = observation.compatibility === "compatible" ? "POSITIVE" : "NEUTRAL";
+      if (finding.impact !== expectedImpact || finding.priority !== "P3" || finding.recommendationCategory !== null) {
+        issue(["impact"], "Only existing positive style-intent results may create strengths; no style repair is inferred.");
+      }
+      const expectedCoverage = observation.compatibility === "unknown" ? "INSUFFICIENT_EVIDENCE" : "EVALUATED";
+      if (finding.coverage.status !== expectedCoverage) issue(["coverage"], "Unknown style results require insufficient-evidence coverage.");
+    }
     if (observation.kind === "furniture_group_composition") {
       const memberIds = observation.members.map((member) => member.itemId);
       if (finding.target.kind !== "dimension" || finding.target.dimension !== "composition"

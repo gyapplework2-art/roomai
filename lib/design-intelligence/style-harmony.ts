@@ -147,7 +147,7 @@ function isAdjacent(
 
 export function evaluateCandidateStyleHarmony(
   intent: Pick<DesignIntent, "primaryStyle" | "secondaryStyle">,
-  candidate: CatalogCandidate,
+  candidate: Pick<CatalogCandidate, "normalizedStyle">,
 ): StyleHarmonyEvaluation {
   if (!candidate.normalizedStyle?.trim()) {
     return {
