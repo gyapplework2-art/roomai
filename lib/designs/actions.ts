@@ -2,9 +2,8 @@
 
 import { findCatalogProducts } from "@/lib/catalog/query";
 import {
-  resolveFurnitureTypeCode,
-  createCoffeeTableCatalogQuery,
-  createCoffeeTableCandidatePool,
+  createSemanticCatalogQuery,
+  createSemanticCatalogCandidatePool,
   type CatalogSelectionsByObjectId,
 } from "@/lib/catalog/integration";
 import { generateDesignSpecification, createDesignBrief } from "@/lib/designs/generation";
@@ -129,19 +128,19 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
       normalizeFurniturePlanForMarket(plan, "north_america"), geometryParsed.data, openings,
     );
     const candidatePools = await Promise.all(
-      constrained.items.filter((item) => resolveFurnitureTypeCode(item.normalizedCategory) === "coffee_table").map(async (item) => {
-        const query = createCoffeeTableCatalogQuery(item, brief.project.currency);
-        if (query === null) return createCoffeeTableCandidatePool(item, [], brief.project.currency);
+      constrained.items.map(async (item) => {
+        const query = createSemanticCatalogQuery(item, brief.project.currency);
+        if (query === null) return createSemanticCatalogCandidatePool(item, [], brief.project.currency);
         try {
           const candidates = await findCatalogProducts(query);
-          return createCoffeeTableCandidatePool(item, candidates, brief.project.currency);
+          return createSemanticCatalogCandidatePool(item, candidates, brief.project.currency);
         } catch (error) {
           console.error("RoomAI catalog enrichment failed", {
             projectId,
             planItemId: item.item.id,
             error: error instanceof Error ? error.name : "UnknownError",
           });
-          return createCoffeeTableCandidatePool(item, [], brief.project.currency);
+          return createSemanticCatalogCandidatePool(item, [], brief.project.currency);
         }
       }),
     );

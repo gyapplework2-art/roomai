@@ -5,7 +5,7 @@ import {
   createCatalogCandidateSelectionContext,
   createSemanticCatalogCandidateSelectionContext,
   resolveFurnitureTypeCode,
-  type CoffeeTableCandidatePool,
+  type SemanticCatalogCandidatePool,
   type SemanticCatalogSelectionContext,
   type CatalogSelectionsByObjectId,
 } from "@/lib/catalog/integration";
@@ -199,7 +199,7 @@ function resolveCatalogSelections(
 export async function generateDesignSpecification(
   brief: DesignBrief,
   catalogCandidates: CatalogCandidate[] = [],
-  semanticGrounding?: { plan: FurniturePlanV11; candidatePools: CoffeeTableCandidatePool[] },
+  semanticGrounding?: { plan: FurniturePlanV11; candidatePools: SemanticCatalogCandidatePool[] },
 ) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -219,7 +219,7 @@ export async function generateDesignSpecification(
     ? `\n\nAvailable real catalog candidates:\n${JSON.stringify(visibleCandidates)}\n\nThe supplied catalog candidates are real available products for design grounding. Use their real title, dimensions, material, color, style, and RoomAI selling price when useful. A furniture object may select one supplied candidate by returning its exact catalogSelectionKey. If no suitable candidate exists, return catalogSelectionKey: null. Do not invent selection keys, product IDs, variant IDs, additional catalog identity, or exact availability; catalog identity persistence is resolved server-side after generation.`
     : "";
   const semanticPlanning = semanticGrounding
-    ? `\n\nAuthoritative semantic furniture plan:\n${JSON.stringify(semanticGrounding.plan)}\n\nPreserve plan item IDs as furniture objectId values and preserve their semantic placement intent. Each candidate pool belongs only to its planItemId. Only coffee_table objects may select those candidates, and only from their own pool. When a suitable candidate exists, select its key and use its exact dimensions and customer price in the project currency. Unknown normalized material or color is not a verified catalog fact; do not invent catalog metadata. For empty pools and all other furniture types, keep catalogSelectionKey null and continue the unmatched design behavior.`
+    ? `\n\nAuthoritative semantic furniture plan:\n${JSON.stringify(semanticGrounding.plan)}\n\nPreserve plan item IDs as furniture objectId values and preserve their semantic placement intent. Each candidate pool belongs only to its planItemId. Objects may select candidates only from their own pool and only for the matching canonical furniture type. Use the canonical furnitureTypeCode as the category when selecting a candidate. When a suitable candidate exists, select its key and use its exact dimensions and customer price in the project currency. Unknown normalized material or color is not a verified catalog fact; do not invent catalog metadata. For unsupported types and empty pools, keep catalogSelectionKey null and continue the unmatched design behavior.`
     : "";
   const response = await openai.responses.parse({
     model: DESIGN_MODEL,
@@ -262,8 +262,9 @@ function resolveSemanticCatalogSelections(
     const selection = Object.hasOwn(context.selectionByKey, key) ? context.selectionByKey[key] : undefined;
     const candidate = selection?.candidate;
     if (!selection || !candidate || selection.planItemId !== object.objectId
-      || resolveFurnitureTypeCode(object.category) !== "coffee_table"
-      || resolveFurnitureTypeCode(candidate.furnitureTypeCode ?? "") !== "coffee_table"
+      || resolveFurnitureTypeCode(selection.furnitureTypeCode) === null
+      || resolveFurnitureTypeCode(object.category) !== selection.furnitureTypeCode
+      || resolveFurnitureTypeCode(candidate.furnitureTypeCode ?? "") !== selection.furnitureTypeCode
       || candidate.currency?.trim().toUpperCase() !== currency
       || ![candidate.widthCm, candidate.depthCm, candidate.heightCm].every((value) => value !== null && Number.isFinite(value) && value > 0)
       || candidate.roomaiSellingPrice === null || !Number.isFinite(candidate.roomaiSellingPrice) || candidate.roomaiSellingPrice < 0) {

@@ -13,13 +13,15 @@ export type CatalogSelectionIdentity = {
 
 export type CatalogSelectionsByObjectId = Record<string, CatalogSelectionIdentity>;
 
-export type CoffeeTableCandidatePool = {
+export type SemanticCatalogCandidatePool = {
   planItemId: string;
+  furnitureTypeCode: string | null;
   candidates: CatalogCandidate[];
 };
 
 export type SemanticCatalogSelection = CatalogSelectionIdentity & {
   planItemId: string;
+  furnitureTypeCode: string;
   candidate: CatalogCandidate;
 };
 
@@ -28,16 +30,16 @@ export type SemanticCatalogSelectionContext = {
   selectionByKey: Record<string, SemanticCatalogSelection>;
 };
 
-export function createCoffeeTableCatalogQuery(
+export function createSemanticCatalogQuery(
   item: RoomConstrainedPlanItem,
   currency: string,
 ): CatalogQuery | null {
-  if (resolveFurnitureTypeCode(item.normalizedCategory) !== "coffee_table"
-    || item.roomStatus !== "ready" || item.finalSearchRange === null) return null;
+  const furnitureTypeCode = resolveFurnitureTypeCode(item.normalizedCategory);
+  if (furnitureTypeCode === null || item.roomStatus !== "ready" || item.finalSearchRange === null) return null;
   const range = item.finalSearchRange;
   return {
     countryCode: "US",
-    furnitureTypeCode: "coffee_table",
+    furnitureTypeCode,
     currency,
     normalizedAvailability: "in_stock",
     maxWidthCm: range.widthMaxCm,
@@ -47,12 +49,12 @@ export function createCoffeeTableCatalogQuery(
   };
 }
 
-export function createCoffeeTableCandidatePool(
+export function createSemanticCatalogCandidatePool(
   item: RoomConstrainedPlanItem,
   candidates: CatalogCandidate[],
   currency: string,
-): CoffeeTableCandidatePool {
-  const query = createCoffeeTableCatalogQuery(item, currency);
+): SemanticCatalogCandidatePool {
+  const query = createSemanticCatalogQuery(item, currency);
   const range = item.finalSearchRange;
   const eligible = query && range ? candidates.filter((candidate) => {
     const dimensions = [candidate.widthCm, candidate.depthCm, candidate.heightCm];
@@ -68,15 +70,19 @@ export function createCoffeeTableCandidatePool(
       && /^https?:\/\//.test(candidate.primaryImageUrl)
       && z.string().url().safeParse(candidate.primaryImageUrl).success;
   }) : [];
-  return { planItemId: item.item.id, candidates: selectDesignCatalogCandidates([eligible]) };
+  return {
+    planItemId: item.item.id,
+    furnitureTypeCode: resolveFurnitureTypeCode(item.normalizedCategory),
+    candidates: selectDesignCatalogCandidates([eligible]),
+  };
 }
 
 export function createSemanticCatalogCandidateSelectionContext(
-  pools: CoffeeTableCandidatePool[],
+  pools: SemanticCatalogCandidatePool[],
 ): SemanticCatalogSelectionContext {
-  const offered = pools.flatMap((pool) => pool.candidates.map((candidate) => ({
-    planItemId: pool.planItemId, candidate,
-  })));
+  const offered = pools.flatMap((pool) => pool.furnitureTypeCode === null ? [] : pool.candidates
+    .filter((candidate) => resolveFurnitureTypeCode(candidate.furnitureTypeCode ?? "") === pool.furnitureTypeCode)
+    .map((candidate) => ({ planItemId: pool.planItemId, furnitureTypeCode: pool.furnitureTypeCode!, candidate })));
   const context = createCatalogCandidateSelectionContext(offered.map((entry) => entry.candidate));
   const selectionByKey: Record<string, SemanticCatalogSelection> = {};
   const aiCandidatePools = pools.map((pool) => ({
@@ -87,6 +93,7 @@ export function createSemanticCatalogCandidateSelectionContext(
       selectionByKey[candidate.catalogSelectionKey] = {
         ...context.selectionByKey[candidate.catalogSelectionKey],
         planItemId: entry.planItemId,
+        furnitureTypeCode: entry.furnitureTypeCode,
         candidate: entry.candidate,
       };
       return true;
@@ -131,7 +138,7 @@ const FURNITURE_TYPE_ALIASES: Record<string, string> = {
 
 export function resolveFurnitureTypeCode(value: string): string | null {
   const normalized = value.trim().toLowerCase().replace(/[\/_-]+/g, " ").replace(/\s+/g, " ");
-  return FURNITURE_TYPE_ALIASES[normalized] ?? null;
+  return Object.hasOwn(FURNITURE_TYPE_ALIASES, normalized) ? FURNITURE_TYPE_ALIASES[normalized] : null;
 }
 
 export function deduplicateCatalogCandidates(candidates: CatalogCandidate[]): CatalogCandidate[] {

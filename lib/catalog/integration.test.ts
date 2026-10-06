@@ -6,8 +6,8 @@ import {
   deduplicateCatalogCandidates,
   resolveFurnitureTypeCode,
   selectDesignCatalogCandidates,
-  createCoffeeTableCatalogQuery,
-  createCoffeeTableCandidatePool,
+  createSemanticCatalogQuery,
+  createSemanticCatalogCandidatePool,
   createSemanticCatalogCandidateSelectionContext,
 } from "@/lib/catalog/integration";
 import type { RoomConstrainedPlanItem } from "@/lib/furniture-planning/room-constraints";
@@ -71,7 +71,7 @@ test("normalizes case, whitespace, hyphens, and underscores without fuzzy matchi
   assert.equal(resolveFurnitureTypeCode("ACCENT_CHAIR"), "accent_chair");
   assert.equal(resolveFurnitureTypeCode("Coffee-Table"), "coffee_table");
   assert.equal(resolveFurnitureTypeCode("Area_Rug"), "area_rug");
-  for (const unsupported of ["chair", "sofa bed", "ottoman", "PRIMARY_SEATING", "SECONDARY_SEATING", "plant"]) {
+  for (const unsupported of ["chair", "sofa bed", "ottoman", "PRIMARY_SEATING", "SECONDARY_SEATING", "plant", "__proto__", "constructor"]) {
     assert.equal(resolveFurnitureTypeCode(unsupported), null);
   }
 });
@@ -258,11 +258,11 @@ const coffeeCandidate = () => ({ ...candidate("coffee-variant"), furnitureTypeCo
 
 test("coffee-table requirement uses bounded catalog query and item-bound opaque pools", () => {
   const item = coffeeTableRequirement();
-  assert.deepEqual(createCoffeeTableCatalogQuery(item, "USD"), {
+  assert.deepEqual(createSemanticCatalogQuery(item, "USD"), {
     countryCode: "US", furnitureTypeCode: "coffee_table", currency: "USD", normalizedAvailability: "in_stock",
     maxWidthCm: 140, maxDepthCm: 80, maxHeightCm: 50, limit: 30,
   });
-  const pool = createCoffeeTableCandidatePool(item, [coffeeCandidate()], "USD");
+  const pool = createSemanticCatalogCandidatePool(item, [coffeeCandidate()], "USD");
   const context = createSemanticCatalogCandidateSelectionContext([pool]);
   assert.equal(context.aiCandidatePools[0].planItemId, "table-1");
   assert.equal(context.selectionByKey.candidate_1.planItemId, "table-1");
@@ -286,15 +286,46 @@ test("coffee-table eligibility enforces complete ranges and usable catalog facts
     { ...valid, furnitureTypeCode: "sofa" }, { ...valid, normalizedAvailability: "out_of_stock" },
     { ...valid, currency: "CAD" }, { ...valid, countryCode: "CA" },
   ];
-  for (const entry of invalid) assert.deepEqual(createCoffeeTableCandidatePool(item, [entry], "USD").candidates, []);
-  assert.equal(createCoffeeTableCandidatePool(item, [valid, ...invalid], "USD").candidates.length, 1);
+  for (const entry of invalid) assert.deepEqual(createSemanticCatalogCandidatePool(item, [entry], "USD").candidates, []);
+  assert.equal(createSemanticCatalogCandidatePool(item, [valid, ...invalid], "USD").candidates.length, 1);
 });
 
-test("empty, non-coffee-table and room-conflicted pools stay unmatched", () => {
+test("empty, unsupported and room-conflicted pools stay unmatched", () => {
   const item = coffeeTableRequirement();
-  assert.deepEqual(createCoffeeTableCandidatePool(item, [], "USD").candidates, []);
-  for (const skipped of [{ ...item, normalizedCategory: "sofa" }, { ...item, roomStatus: "room_conflict" as const }, { ...item, finalSearchRange: null }]) {
-    assert.equal(createCoffeeTableCatalogQuery(skipped, "USD"), null);
-    assert.deepEqual(createCoffeeTableCandidatePool(skipped, [coffeeCandidate()], "USD").candidates, []);
+  assert.deepEqual(createSemanticCatalogCandidatePool(item, [], "USD").candidates, []);
+  for (const skipped of [{ ...item, normalizedCategory: "desk" }, { ...item, roomStatus: "room_conflict" as const }, { ...item, finalSearchRange: null }]) {
+    assert.equal(createSemanticCatalogQuery(skipped, "USD"), null);
+    assert.deepEqual(createSemanticCatalogCandidatePool(skipped, [coffeeCandidate()], "USD").candidates, []);
+  }
+});
+
+test("existing crosswalk types share eligibility ranking and privacy without new aliases", () => {
+  for (const [category, type] of [["sofa", "sofa"], ["sectional", "sectional_sofa"], ["armchair", "accent_chair"], ["rug", "area_rug"]]) {
+    const item = { ...coffeeTableRequirement(`${type}-1`), normalizedCategory: category };
+    const real = { ...coffeeCandidate(), furnitureTypeCode: type };
+    const query = createSemanticCatalogQuery(item, "USD");
+    assert.equal(query?.furnitureTypeCode, type);
+    const pool = createSemanticCatalogCandidatePool(item, [real, { ...real, furnitureTypeCode: "coffee_table" }], "USD");
+    assert.equal(pool.furnitureTypeCode, type);
+    assert.deepEqual(pool.candidates, [real]);
+    const context = createSemanticCatalogCandidateSelectionContext([pool]);
+    assert.equal(context.selectionByKey.candidate_1.furnitureTypeCode, type);
+    const visible = JSON.stringify(context.aiCandidatePools);
+    for (const privateValue of ["coffee-variant", "product-coffee-variant", "Test Vendor", "https://example.com"]) {
+      assert.equal(visible.includes(privateValue), false);
+    }
+    for (const invalid of [{ ...real, widthCm: 79 }, { ...real, heightCm: 51 }, { ...real, roomaiSellingPrice: null }, { ...real, primaryImageUrl: null }]) {
+      assert.deepEqual(createSemanticCatalogCandidatePool(item, [invalid], "USD").candidates, []);
+    }
+  }
+});
+
+test("unresolved or mismatched pool types cannot offer candidate keys", () => {
+  for (const furnitureTypeCode of [null, "desk", "sofa"]) {
+    const context = createSemanticCatalogCandidateSelectionContext([{
+      planItemId: "unresolved-1", furnitureTypeCode, candidates: [coffeeCandidate()],
+    }]);
+    assert.deepEqual(context.selectionByKey, {});
+    assert.deepEqual(context.aiCandidatePools[0].candidates, []);
   }
 });

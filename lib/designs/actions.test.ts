@@ -6,7 +6,7 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 
 import * as integration from "@/lib/catalog/integration";
-import type { CoffeeTableCandidatePool } from "@/lib/catalog/integration";
+import type { SemanticCatalogCandidatePool } from "@/lib/catalog/integration";
 import type { CatalogCandidate, CatalogQuery } from "@/lib/catalog/schema";
 import { normalizeFurniturePlanForMarket } from "@/lib/furniture-planning/normalize-plan";
 import { constrainFurniturePlanToRoom } from "@/lib/furniture-planning/room-constraints";
@@ -28,6 +28,11 @@ const plan: FurniturePlanV11 = {
     placement: { preferredZone: null, anchorWallId: null, approximatePosition: { xCm: 250, yCm: 300 }, preferredOrientationDegrees: 0 },
     styleHints: [], materialHints: [], colorHints: [], functionalRequirements: [], reasoning: "Seating",
     semanticPlacement: { role: "PRIMARY_SEATING", mode: "FLOATING", targetWallId: null, zoneId: null, alignment: null, relationships: [], fallbackModes: [] },
+  }, {
+    id: "desk-1", category: "desk", subtype: null, priority: "optional", sizeRange: range,
+    placement: { preferredZone: null, anchorWallId: null, approximatePosition: { xCm: 100, yCm: 100 }, preferredOrientationDegrees: 0 },
+    styleHints: [], materialHints: [], colorHints: [], functionalRequirements: [], reasoning: "Optional workspace",
+    semanticPlacement: { role: "STORAGE", mode: "FLOATING", targetWallId: null, zoneId: null, alignment: null, relationships: [], fallbackModes: [] },
   }],
 };
 
@@ -42,10 +47,10 @@ const candidate: CatalogCandidate = {
 };
 
 for (const scenario of ["eligible", "empty", "query_failure"] as const) {
-  test(`design action uses semantic coffee-table queries and preserves unmatched generation: ${scenario}`, async () => {
+  test(`design action queries supported semantic types and preserves unmatched generation: ${scenario}`, async () => {
     const calls: string[] = [];
     const queries: CatalogQuery[] = [];
-    let grounding: { plan: FurniturePlanV11; candidatePools: CoffeeTableCandidatePool[] } | undefined;
+    let grounding: { plan: FurniturePlanV11; candidatePools: SemanticCatalogCandidatePool[] } | undefined;
     const fixtureRows: Record<string, object | null> = {
       projects: { id: "project-1", currency: "USD" }, room_preferences: null, room_geometries: {},
     };
@@ -65,7 +70,11 @@ for (const scenario of ["eligible", "empty", "query_failure"] as const) {
       "@/lib/catalog/query": { findCatalogProducts: async (query: CatalogQuery) => {
         calls.push("query"); queries.push(query);
         if (scenario === "query_failure") throw new Error("simulated read failure");
-        return scenario === "empty" ? [] : [candidate];
+        if (scenario === "empty") return [];
+        return query.furnitureTypeCode === "sofa" ? [{
+          ...candidate, productId: "server-sofa-product", variantId: "server-sofa-variant", furnitureTypeCode: "sofa",
+          widthCm: 220, depthCm: 90, heightCm: 85,
+        }] : [candidate];
       } },
       "@/lib/supabase/server": { createClient: async () => client },
       "@/lib/geometry/schema": { roomGeometrySchema: { safeParse: () => ({ success: true, data: geometry }) } },
@@ -103,8 +112,8 @@ for (const scenario of ["eligible", "empty", "query_failure"] as const) {
     assert.ok(exports.generateDesign);
     const result = await exports.generateDesign("project-1");
     assert.equal(result.success, true);
-    assert.deepEqual(calls, ["plan", "query", "generate", "persist"]);
-    assert.equal(queries.length, 1);
+    assert.deepEqual(calls, ["plan", "query", "query", "generate", "persist"]);
+    assert.equal(queries.length, 2);
     assert.equal(queries[0].furnitureTypeCode, "coffee_table");
     assert.equal(queries[0].countryCode, "US");
     assert.equal(queries[0].currency, "USD");
@@ -112,8 +121,15 @@ for (const scenario of ["eligible", "empty", "query_failure"] as const) {
     assert.equal(queries[0].maxDepthCm, 80);
     assert.equal(queries[0].maxHeightCm, 50);
     assert.equal(grounding?.plan, plan);
-    assert.equal(grounding?.candidatePools.length, 1);
+    assert.equal(queries[1].furnitureTypeCode, "sofa");
+    assert.equal(grounding?.candidatePools.length, 3);
     assert.equal(grounding?.candidatePools[0].planItemId, "table-1");
     assert.equal(grounding?.candidatePools[0].candidates.length, scenario === "eligible" ? 1 : 0);
+    assert.equal(grounding?.candidatePools[1].planItemId, "sofa-1");
+    assert.equal(grounding?.candidatePools[1].furnitureTypeCode, "sofa");
+    assert.equal(grounding?.candidatePools[1].candidates.length, scenario === "eligible" ? 1 : 0);
+    assert.equal(grounding?.candidatePools[2].planItemId, "desk-1");
+    assert.equal(grounding?.candidatePools[2].furnitureTypeCode, null);
+    assert.equal(grounding?.candidatePools[2].candidates.length, 0);
   });
 }
