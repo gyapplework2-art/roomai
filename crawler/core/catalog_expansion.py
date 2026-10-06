@@ -28,6 +28,11 @@ class ActionableExpansionTarget:
     source: ApprovedDiscoverySource
 
 
+def is_catalog_expansion_source_supported(source: ApprovedDiscoverySource) -> bool:
+    """Whether the existing expansion executor can handle an approved source."""
+    return source.vendor.lower() == "article" and source.vendor_market_code == "US"
+
+
 def select_actionable_expansion_targets(
     report: CatalogCoverageReport,
     *,
@@ -201,7 +206,7 @@ async def expand_catalog_coverage(
     for target in actionable:
         source = target.source
 
-        if source.vendor.lower() != "article" or source.vendor_market_code != "US":
+        if not is_catalog_expansion_source_supported(source):
             continue
 
         source_fetch = await fetcher.fetch(source.source_url)
