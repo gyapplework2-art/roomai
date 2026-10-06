@@ -1,6 +1,7 @@
 """Vendor-neutral, bounded crawler targets derived from the E.11.3 plan."""
 
 from dataclasses import dataclass
+from typing import Literal
 
 from crawler.core.catalog_batch import MAX_BATCH_LIMIT
 from crawler.core.catalog_coverage import E11_P0_MINIMUM_VIABLE_COVERAGE_PLAN
@@ -22,14 +23,29 @@ class E11CrawlerAcquisitionTarget:
     missing_ready_variants: int
     acquisition_reason: AcquisitionReason
     discovery_candidate_limit: int
+    planned_batch_count: int
+    per_batch_candidate_limits: tuple[int, ...]
 
 
 @dataclass(frozen=True)
 class E11CrawlerAcquisitionTargets:
     targets: tuple[E11CrawlerAcquisitionTarget, ...]
+    dry_run: Literal[True] = True
 
     def as_dict(self) -> dict[str, object]:
-        return {"targets": [target.__dict__ for target in self.targets]}
+        return {"dry_run": self.dry_run, "targets": [target.__dict__ for target in self.targets]}
+
+
+def _bounded_batch_limits(candidate_limit: int) -> tuple[int, ...]:
+    if isinstance(candidate_limit, bool) or not isinstance(candidate_limit, int) or candidate_limit < 1:
+        raise E11CrawlerTargetError("E11_CRAWLER_TARGET_INVALID_CANDIDATE_LIMIT")
+    batch_limits: list[int] = []
+    remaining = candidate_limit
+    while remaining:
+        batch_size = min(remaining, MAX_BATCH_LIMIT)
+        batch_limits.append(batch_size)
+        remaining -= batch_size
+    return tuple(batch_limits)
 
 
 def select_e11_p0_crawler_targets(
@@ -69,13 +85,17 @@ def select_e11_p0_crawler_targets(
         requested_candidates = max(gaps)
         if requested_candidates < 1:
             raise E11CrawlerTargetError("E11_CRAWLER_TARGET_ACQUISITION_WITHOUT_GAP")
+        discovery_candidate_limit = min(requested_candidates, MAX_BATCH_LIMIT)
+        per_batch_candidate_limits = _bounded_batch_limits(discovery_candidate_limit)
         targets.append(E11CrawlerAcquisitionTarget(
             market_code=row.market_code,
             furniture_type_code=row.furniture_type_code,
             missing_distinct_products=row.missing_distinct_products,
             missing_ready_variants=row.missing_ready_variants,
             acquisition_reason=row.acquisition_reason,
-            discovery_candidate_limit=min(requested_candidates, MAX_BATCH_LIMIT),
+            discovery_candidate_limit=discovery_candidate_limit,
+            planned_batch_count=len(per_batch_candidate_limits),
+            per_batch_candidate_limits=per_batch_candidate_limits,
         ))
 
     return E11CrawlerAcquisitionTargets(tuple(targets))

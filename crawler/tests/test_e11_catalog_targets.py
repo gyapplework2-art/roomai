@@ -34,12 +34,18 @@ def _target(targets, furniture_type_code):
 
 def test_empty_e11_catalog_emits_all_five_targets_in_e11_order():
     plan = _empty_acquisition_plan()
+    snapshot = deepcopy(plan)
     targets = select_e11_p0_crawler_targets(plan)
     expected = tuple(target.furniture_type_code for target in E11_P0_MINIMUM_VIABLE_COVERAGE_PLAN.targets)
 
     assert tuple(target.furniture_type_code for target in targets.targets) == expected
     assert len(targets.targets) == 5
+    assert targets.dry_run is True
+    assert targets.as_dict()["dry_run"] is True
+    assert plan == snapshot
     assert all(target.discovery_candidate_limit == 4 for target in targets.targets)
+    assert all(target.planned_batch_count == 1 for target in targets.targets)
+    assert all(target.per_batch_candidate_limits == (4,) for target in targets.targets)
 
 
 def test_fully_covered_e11_plan_emits_no_active_targets():
@@ -112,10 +118,13 @@ def test_product_only_ready_variant_only_and_combined_gaps_are_preserved():
     chair = _target(targets, "accent_chair")
     assert (sofa.missing_distinct_products, sofa.missing_ready_variants) == (1, 0)
     assert sofa.discovery_candidate_limit == 1
+    assert sofa.planned_batch_count == 1 and sofa.per_batch_candidate_limits == (1,)
     assert (sectional.missing_distinct_products, sectional.missing_ready_variants) == (0, 2)
     assert sectional.discovery_candidate_limit == 2
+    assert sectional.planned_batch_count == 1 and sectional.per_batch_candidate_limits == (2,)
     assert (chair.missing_distinct_products, chair.missing_ready_variants) == (1, 3)
     assert chair.discovery_candidate_limit == 3
+    assert chair.planned_batch_count == 1 and chair.per_batch_candidate_limits == (3,)
     assert all("vendor" not in target.__dict__ and "source_url" not in target.__dict__ for target in targets.targets)
 
 
@@ -133,8 +142,12 @@ def test_discovery_limit_is_larger_gap_capped_by_existing_batch_maximum():
 
     assert MAX_BATCH_LIMIT == 50
     assert all(target.discovery_candidate_limit == MAX_BATCH_LIMIT for target in targets.targets)
+    assert all(target.planned_batch_count == 1 for target in targets.targets)
+    assert all(target.per_batch_candidate_limits == (MAX_BATCH_LIMIT,) for target in targets.targets)
     assert all(target.missing_distinct_products == 70 for target in targets.targets)
     assert all(target.missing_ready_variants == 90 for target in targets.targets)
+    assert all(sum(target.per_batch_candidate_limits) == target.discovery_candidate_limit for target in targets.targets)
+    assert all(sum(target.per_batch_candidate_limits) <= target.discovery_candidate_limit for target in targets.targets)
 
 
 def test_non_p0_rows_do_not_create_targets_and_source_plan_is_immutable():
@@ -164,6 +177,13 @@ def test_invalid_e11_3_gap_input_fails_fast(changes):
     broken = _replace_rows(source, {"sofa": changes})
     with pytest.raises(E11CrawlerTargetError):
         select_e11_p0_crawler_targets(broken)
+
+
+def test_empty_plan_conversion_does_not_mutate_e11_3_input():
+    source = _empty_acquisition_plan()
+    snapshot = deepcopy(source)
+    select_e11_p0_crawler_targets(source)
+    assert source == snapshot
 
 
 def test_invalid_or_duplicate_contract_rows_fail_fast():
