@@ -211,16 +211,30 @@ class SupabaseCatalogExecutor:
         self, plans: tuple[CatalogPersistencePlan, ...], *, execution_requested: bool = False,
     ) -> tuple[ExecutionReport, ...]:
         """Guard future batch callers: the initial rollout permits one plan only."""
-        if len(plans) > self._settings.catalog_max_products_per_execution:
-            return tuple(
-                ExecutionReport(
-                    execution_requested=execution_requested,
-                    writes_enabled=False,
-                    blocking_reasons=["product_limit_exceeded"],
-                )
-                for _ in plans
-            )
+        limit_reports = self.batch_limit_failure_reports(
+            len(plans), execution_requested=execution_requested,
+        )
+        if limit_reports is not None:
+            return limit_reports
         return tuple(await self.execute(plan, execution_requested=execution_requested) for plan in plans)
+
+    def batch_limit_failure_reports(
+        self,
+        product_count: int,
+        *,
+        execution_requested: bool,
+    ) -> tuple[ExecutionReport, ...] | None:
+        """Return the existing fail-closed report for an oversized batch without I/O."""
+        if product_count <= self._settings.catalog_max_products_per_execution:
+            return None
+        return tuple(
+            ExecutionReport(
+                execution_requested=execution_requested,
+                writes_enabled=False,
+                blocking_reasons=["product_limit_exceeded"],
+            )
+            for _ in range(product_count)
+        )
 
     async def _apply(self, dry_run: CatalogDryRun, report: ExecutionReport) -> None:
         for operation in dry_run.operations:

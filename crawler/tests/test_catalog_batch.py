@@ -7,7 +7,7 @@ from pathlib import Path
 from crawler.core.catalog_batch import intake_candidates, persist_batch, promote_batch
 from crawler.core.fetcher import FetchResult
 from crawler.core.persistence import build_persistence_plan
-from crawler.core.supabase_repository import ExecutionReport
+from crawler.core.supabase_repository import ExecutionReport, RestResponse, SupabaseCatalogExecutor
 from crawler.core.config import CrawlerSettings
 from crawler.jobs import expand_catalog
 from crawler.vendors.article import ArticleVendorAdapter
@@ -38,6 +38,60 @@ def candidates():
         {"product_url": "https://example.com/product/40400/missing", "source_category": "sofas"},
         {"product_url": "https://example.com/product/90090/sofa", "source_category": "sofas"},
     ]
+
+
+def persistence_plans(count):
+    source = (FIXTURES / "normal_sofa.html").read_text()
+    parsed = ArticleVendorAdapter("US").parse_product(
+        source,
+        "https://example.com/product/90090/sofa",
+        datetime.now(timezone.utc),
+    )
+    return [
+        build_persistence_plan(parsed.model_copy(update={"vendor_product_id": f"batch-sku-{index}"}))
+        for index in range(count)
+    ]
+
+
+class RecordingCatalogTransport:
+    def __init__(self):
+        self.calls = []
+
+    async def resolve_country(self, country_code):
+        self.calls.append(("resolve_country", country_code))
+        return RestResponse(200, [{"id": "country-us"}])
+
+    async def resolve_furniture_type(self, furniture_type_code):
+        self.calls.append(("resolve_furniture_type", furniture_type_code))
+        return RestResponse(200, [{"id": f"type-{furniture_type_code}"}])
+
+    async def get_current_offer(self, variant_id):
+        self.calls.append(("get_current_offer", variant_id))
+        return RestResponse(200, [])
+
+    async def append_history(self, table, values):
+        self.calls.append(("append_history", table, values))
+        return RestResponse(201, [{"id": f"history-{len(self.calls)}"}])
+
+    async def upsert(self, table, values, conflict_target):
+        self.calls.append(("upsert", table, values, conflict_target))
+        return RestResponse(201, [{"id": f"{table}-{len(self.calls)}"}])
+
+
+class CountingCatalogExecutor(SupabaseCatalogExecutor):
+    def __init__(self, transport, maximum):
+        settings = CrawlerSettings(
+            SUPABASE_URL="https://example.supabase.co",
+            SUPABASE_SECRET_KEY="local-test-only",
+            CATALOG_ALLOW_WRITES=True,
+            CATALOG_MAX_PRODUCTS_PER_EXECUTION=maximum,
+        )
+        super().__init__(transport, settings=settings, write_enabled=True)
+        self.execute_calls = 0
+
+    async def execute(self, plan, *, execution_requested=False):
+        self.execute_calls += 1
+        return await super().execute(plan, execution_requested=execution_requested)
 
 
 def test_intake_is_bounded_sequential_and_isolates_failures():
@@ -113,6 +167,9 @@ def test_persistence_batch_isolates_partial_failure():
         def __init__(self):
             self.index = 0
 
+        def batch_limit_failure_reports(self, product_count, *, execution_requested):
+            return None
+
         async def execute(self, plan, *, execution_requested):
             self.index += 1
             if self.index == 1:
@@ -126,6 +183,74 @@ def test_persistence_batch_isolates_partial_failure():
     )
     result = run(persist_batch([build_persistence_plan(product), build_persistence_plan(product.model_copy(update={"vendor_product_id": "other"}))], executor=FakeExecutor(), execute=True))
     assert [item.outcome for item in result.items] == ["persisted", "failed"]
+
+
+def test_write_enabled_oversized_batch_fails_before_first_executor_or_transport_call():
+    transport = RecordingCatalogTransport()
+    executor = CountingCatalogExecutor(transport, maximum=1)
+
+    result = run(persist_batch(persistence_plans(4), executor=executor, execute=True))
+
+    assert executor.execute_calls == 0
+    assert transport.calls == []
+    assert len(result.items) == 4
+    assert all(item.outcome == "skipped" for item in result.items)
+    assert all("product_limit_exceeded" in item.report.blocking_reasons for item in result.items)
+    assert result.dry_run is True
+
+
+def test_write_enabled_batch_at_aggregate_maximum_executes_every_plan():
+    transport = RecordingCatalogTransport()
+    executor = CountingCatalogExecutor(transport, maximum=4)
+
+    result = run(persist_batch(persistence_plans(4), executor=executor, execute=True))
+
+    assert executor.execute_calls == 4
+    assert sum(call[0] == "upsert" and call[1] == "catalog_products" for call in transport.calls) == 4
+    assert all(item.outcome == "persisted" for item in result.items)
+    assert result.dry_run is False
+
+
+def test_dry_run_batch_is_not_rejected_by_write_cap_and_performs_no_transport_calls():
+    transport = RecordingCatalogTransport()
+    executor = CountingCatalogExecutor(transport, maximum=1)
+
+    result = run(persist_batch(persistence_plans(4), executor=executor, execute=False))
+
+    assert executor.execute_calls == 4
+    assert transport.calls == []
+    assert all(item.outcome == "planned" for item in result.items)
+    assert result.dry_run is True
+
+
+def test_review_and_failed_intake_items_do_not_count_toward_executable_batch_limit():
+    fetcher = FixtureFetcher()
+    intake = run(intake_candidates([
+        {"product_url": "https://example.com/product/90090/sofa", "source_category": "sofas", "furniture_type_code": "sofa"},
+        {"product_url": "https://example.com/product/90091/sofa", "source_category": "sofas", "furniture_type_code": "coffee_table"},
+        {"product_url": "https://example.com/product/40400/missing", "source_category": "sofas"},
+    ], adapter=ArticleVendorAdapter("US"), fetcher=fetcher, limit=3))
+    assert [item.status for item in intake.items] == ["ready", "review_required", "failed"]
+
+    transport = RecordingCatalogTransport()
+    executor = CountingCatalogExecutor(transport, maximum=1)
+    accepted_plans = [item.plan for item in intake.ready if item.plan is not None]
+    result = run(persist_batch(accepted_plans, executor=executor, execute=True))
+
+    assert len(accepted_plans) == 1
+    assert executor.execute_calls == 1
+    assert sum(call[0] == "upsert" and call[1] == "catalog_products" for call in transport.calls) == 1
+    assert [item.outcome for item in result.items] == ["persisted"]
+
+
+def test_single_product_write_behavior_remains_valid_at_maximum_one():
+    transport = RecordingCatalogTransport()
+    executor = CountingCatalogExecutor(transport, maximum=1)
+
+    result = run(persist_batch(persistence_plans(1), executor=executor, execute=True))
+
+    assert executor.execute_calls == 1
+    assert all(item.outcome == "persisted" for item in result.items)
 
 
 def test_persistence_batch_skips_duplicate_natural_keys_without_second_execution():

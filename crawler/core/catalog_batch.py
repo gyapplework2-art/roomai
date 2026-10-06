@@ -193,9 +193,20 @@ async def persist_batch(
     execute: bool = False,
 ) -> BatchPersistenceResult:
     """Apply plans independently through the existing guarded executor."""
+    plan_items = list(plans)
+    unique_plan_count = len({
+        (plan.vendor_market.market_code, plan.product_natural_key)
+        for plan in plan_items
+    })
+    limit_reports = (
+        executor.batch_limit_failure_reports(unique_plan_count, execution_requested=True)
+        if execute and unique_plan_count > 1
+        else None
+    )
     results: list[BatchPersistenceItem] = []
     seen_natural_keys: set[tuple[str, str]] = set()
-    for plan in plans:
+    rejected_reports = iter(limit_reports or ())
+    for plan in plan_items:
         identity = (plan.vendor_market.market_code, plan.product_natural_key)
         if identity in seen_natural_keys:
             report = ExecutionReport(
@@ -206,6 +217,10 @@ async def persist_batch(
             results.append(BatchPersistenceItem(plan.product_natural_key, "skipped", report))
             continue
         seen_natural_keys.add(identity)
+        if limit_reports is not None:
+            report = next(rejected_reports)
+            results.append(BatchPersistenceItem(plan.product_natural_key, "skipped", report))
+            continue
         try:
             report = await executor.execute(plan, execution_requested=execute)
         except Exception:
