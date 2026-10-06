@@ -3,7 +3,8 @@
 import { findCatalogProducts } from "@/lib/catalog/query";
 import {
   resolveFurnitureTypeCode,
-  selectDesignCatalogCandidates,
+  createCoffeeTableCatalogQuery,
+  createCoffeeTableCandidatePool,
   type CatalogSelectionsByObjectId,
 } from "@/lib/catalog/integration";
 import { generateDesignSpecification, createDesignBrief } from "@/lib/designs/generation";
@@ -18,6 +19,9 @@ import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
 import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
 import { createClient } from "@/lib/supabase/server";
 import type { Tables } from "@/types/database.types";
+import { createFurniturePlanningBrief, generateFurniturePlan } from "@/lib/furniture-planning/generation";
+import { normalizeFurniturePlanForMarket } from "@/lib/furniture-planning/normalize-plan";
+import { constrainFurniturePlanToRoom } from "@/lib/furniture-planning/room-constraints";
 
 type GenerationResult =
   | { success: true; designId: string; version: number; specification: DesignSpecification }
@@ -114,37 +118,37 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
       geometryParsed.data as RoomGeometry,
       openings,
     );
-    const requestedFurnitureTypes = [
-      ...brief.preferences.mustHaveItems,
-      ...brief.preferences.niceToHaveItems,
-    ]
-      .map(resolveFurnitureTypeCode)
-      .filter((code): code is string => code !== null);
-    const uniqueFurnitureTypes = [...new Set(requestedFurnitureTypes)];
-    const catalogResults = await Promise.all(
-      uniqueFurnitureTypes.map(async (furnitureTypeCode) => {
+    const planningBrief = createFurniturePlanningBrief(
+      projectResult.data as Tables<"projects">,
+      preferencesResult.data as Tables<"room_preferences"> | null,
+      geometryParsed.data,
+      openings,
+    );
+    const plan = await generateFurniturePlan(planningBrief, geometryParsed.data, openings);
+    const constrained = constrainFurniturePlanToRoom(
+      normalizeFurniturePlanForMarket(plan, "north_america"), geometryParsed.data, openings,
+    );
+    const candidatePools = await Promise.all(
+      constrained.items.filter((item) => resolveFurnitureTypeCode(item.normalizedCategory) === "coffee_table").map(async (item) => {
+        const query = createCoffeeTableCatalogQuery(item, brief.project.currency);
+        if (query === null) return createCoffeeTableCandidatePool(item, [], brief.project.currency);
         try {
-          return await findCatalogProducts({
-            countryCode: "US",
-            furnitureTypeCode,
-            currency: brief.project.currency,
-            normalizedAvailability: "in_stock",
-            limit: 30,
-          });
+          const candidates = await findCatalogProducts(query);
+          return createCoffeeTableCandidatePool(item, candidates, brief.project.currency);
         } catch (error) {
           console.error("RoomAI catalog enrichment failed", {
             projectId,
-            furnitureTypeCode,
+            planItemId: item.item.id,
             error: error instanceof Error ? error.name : "UnknownError",
           });
-          return [];
+          return createCoffeeTableCandidatePool(item, [], brief.project.currency);
         }
       }),
     );
-    const catalogCandidates = selectDesignCatalogCandidates(catalogResults);
     const generation = await generateDesignSpecification(
       brief,
-      catalogCandidates,
+      [],
+      { plan, candidatePools },
     );
     specification = generation.specification;
     catalogSelectionsByObjectId = generation.catalogSelectionsByObjectId;
@@ -153,7 +157,7 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
       return { success: false, error: "not_configured" };
     }
 
-    if (error instanceof Error && error.message === "AI_INVALID_RESPONSE") {
+    if (error instanceof Error && (error.message === "AI_INVALID_RESPONSE" || error.message === "FURNITURE_PLAN_INVALID_RESPONSE")) {
       return { success: false, error: "invalid_response" };
     }
 

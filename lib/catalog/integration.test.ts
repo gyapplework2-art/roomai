@@ -6,7 +6,11 @@ import {
   deduplicateCatalogCandidates,
   resolveFurnitureTypeCode,
   selectDesignCatalogCandidates,
+  createCoffeeTableCatalogQuery,
+  createCoffeeTableCandidatePool,
+  createSemanticCatalogCandidateSelectionContext,
 } from "@/lib/catalog/integration";
+import type { RoomConstrainedPlanItem } from "@/lib/furniture-planning/room-constraints";
 import { furnitureRoles } from "@/lib/furniture-planning/semantic-types";
 import { catalogSelectionTestHelpers } from "@/lib/designs/generation";
 import { furnitureObjectSchema } from "@/lib/designs/schema";
@@ -233,4 +237,64 @@ test("AI catalog candidate uses an opaque key while server retains catalog ident
   });
   assert.equal(JSON.stringify(aiCandidates).includes("product-variant-contract"), false);
   assert.equal(JSON.stringify(aiCandidates).includes("variant-contract"), false);
+});
+
+export function coffeeTableRequirement(id = "table-1"): RoomConstrainedPlanItem {
+  const range = { widthMinCm: 80, widthMaxCm: 140, depthMinCm: 45, depthMaxCm: 80, heightMinCm: 35, heightMaxCm: 50 };
+  return {
+    item: {
+      id, category: "coffee_table", subtype: null, priority: "required",
+      placement: { preferredZone: null, anchorWallId: null, approximatePosition: { xCm: 200, yCm: 200 }, preferredOrientationDegrees: 0 },
+      sizeRange: range, styleHints: [], materialHints: [], colorHints: [], functionalRequirements: [], reasoning: "Coffee surface",
+      semanticPlacement: { role: "COFFEE_TABLE", mode: "FLOATING", alignment: null, zoneId: null, targetWallId: null, relationships: [], fallbackModes: [] },
+    },
+    normalizedCategory: "coffee_table", normalizedSubtype: null, marketRule: null,
+    preferredRange: range, marketRange: range, searchRange: range, status: "ready",
+    roomConstraint: null, finalSearchRange: range, roomStatus: "ready",
+  };
+}
+
+const coffeeCandidate = () => ({ ...candidate("coffee-variant"), furnitureTypeCode: "coffee_table", widthCm: 100, depthCm: 60, heightCm: 40 });
+
+test("coffee-table requirement uses bounded catalog query and item-bound opaque pools", () => {
+  const item = coffeeTableRequirement();
+  assert.deepEqual(createCoffeeTableCatalogQuery(item, "USD"), {
+    countryCode: "US", furnitureTypeCode: "coffee_table", currency: "USD", normalizedAvailability: "in_stock",
+    maxWidthCm: 140, maxDepthCm: 80, maxHeightCm: 50, limit: 30,
+  });
+  const pool = createCoffeeTableCandidatePool(item, [coffeeCandidate()], "USD");
+  const context = createSemanticCatalogCandidateSelectionContext([pool]);
+  assert.equal(context.aiCandidatePools[0].planItemId, "table-1");
+  assert.equal(context.selectionByKey.candidate_1.planItemId, "table-1");
+  assert.equal(context.aiCandidatePools[0].candidates[0].normalizedMaterial, null);
+  const visible = JSON.stringify(context.aiCandidatePools);
+  for (const privateValue of ["coffee-variant", "product-coffee-variant", "Test Vendor", "https://example.com"]) {
+    assert.equal(visible.includes(privateValue), false);
+  }
+});
+
+test("coffee-table eligibility enforces complete ranges and usable catalog facts", () => {
+  const item = coffeeTableRequirement();
+  const valid = coffeeCandidate();
+  const invalid = [
+    { ...valid, widthCm: 79 }, { ...valid, widthCm: 141 },
+    { ...valid, depthCm: 44 }, { ...valid, depthCm: 81 },
+    { ...valid, heightCm: 34 }, { ...valid, heightCm: 51 },
+    { ...valid, widthCm: null }, { ...valid, depthCm: 0 }, { ...valid, heightCm: Number.NaN },
+    { ...valid, roomaiSellingPrice: null }, { ...valid, roomaiSellingPrice: -1 }, { ...valid, roomaiSellingPrice: Infinity },
+    { ...valid, primaryImageUrl: null }, { ...valid, primaryImageUrl: "invalid" },
+    { ...valid, furnitureTypeCode: "sofa" }, { ...valid, normalizedAvailability: "out_of_stock" },
+    { ...valid, currency: "CAD" }, { ...valid, countryCode: "CA" },
+  ];
+  for (const entry of invalid) assert.deepEqual(createCoffeeTableCandidatePool(item, [entry], "USD").candidates, []);
+  assert.equal(createCoffeeTableCandidatePool(item, [valid, ...invalid], "USD").candidates.length, 1);
+});
+
+test("empty, non-coffee-table and room-conflicted pools stay unmatched", () => {
+  const item = coffeeTableRequirement();
+  assert.deepEqual(createCoffeeTableCandidatePool(item, [], "USD").candidates, []);
+  for (const skipped of [{ ...item, normalizedCategory: "sofa" }, { ...item, roomStatus: "room_conflict" as const }, { ...item, finalSearchRange: null }]) {
+    assert.equal(createCoffeeTableCatalogQuery(skipped, "USD"), null);
+    assert.deepEqual(createCoffeeTableCandidatePool(skipped, [coffeeCandidate()], "USD").candidates, []);
+  }
 });

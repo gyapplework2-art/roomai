@@ -5,6 +5,7 @@ import { catalogSelectionTestHelpers } from "@/lib/designs/generation";
 import { createDesignObjectInserts } from "@/lib/designs/persistence";
 import type { DesignSpecification } from "@/lib/designs/types";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
+import { createSemanticCatalogCandidateSelectionContext } from "@/lib/catalog/integration";
 
 function candidate(
   productId: string,
@@ -165,4 +166,64 @@ test("invented opaque catalog key cannot create persisted catalog identity", () 
   assert.equal(insert.catalog_product_id, null);
   assert.equal(insert.catalog_product_variant_id, null);
   assert.equal(insert.product_id, null);
+});
+
+function semanticContext() {
+  const coffee = { ...candidate("server-coffee-product", "server-coffee-variant"), furnitureTypeCode: "coffee_table", widthCm: 110, depthCm: 65, heightCm: 40, normalizedMaterial: null, roomaiSellingPrice: 700 };
+  return createSemanticCatalogCandidateSelectionContext([
+    { planItemId: "table-1", candidates: [coffee] },
+    { planItemId: "table-2", candidates: [coffee] },
+  ]);
+}
+
+function coffeeSpecification(key: string | null): DesignSpecification {
+  const original = specification(key);
+  return {
+    ...original, budget: { ...original.budget, currency: "CAD" },
+    furniture: [{ ...original.furniture[0], objectId: "table-1", category: "coffee_table", dimensions: { widthCm: 1, depthCm: 1, heightCm: 1 }, estimatedPrice: 1 }],
+  };
+}
+
+test("semantic coffee-table selection uses authoritative dimensions price currency and persisted identity", () => {
+  const context = semanticContext();
+  const result = catalogSelectionTestHelpers.resolveSemanticCatalogSelections(coffeeSpecification("candidate_1"), context, "USD");
+  assert.deepEqual(result.specification.furniture[0].dimensions, { widthCm: 110, depthCm: 65, heightCm: 40 });
+  assert.equal(result.specification.furniture[0].estimatedPrice, 700);
+  assert.equal(result.specification.budget.currency, "USD");
+  assert.equal(context.aiCandidatePools[0].candidates[0].normalizedMaterial, null);
+  const [insert] = createDesignObjectInserts("design-1", result.specification, result.catalogSelectionsByObjectId);
+  assert.equal(insert.catalog_product_id, "server-coffee-product");
+  assert.equal(insert.catalog_product_variant_id, "server-coffee-variant");
+  assert.equal(insert.width_cm, 110);
+  assert.equal(insert.depth_cm, 65);
+  assert.equal(insert.height_cm, 40);
+});
+
+test("invented and cross-semantic-item keys cannot bind coffee-table identity", () => {
+  for (const key of ["candidate_999", "candidate_2", "__proto__", "constructor"]) {
+    const result = catalogSelectionTestHelpers.resolveSemanticCatalogSelections(coffeeSpecification(key), semanticContext(), "USD");
+    assert.equal(result.specification.furniture[0].catalogSelectionKey, null);
+    assert.deepEqual(result.catalogSelectionsByObjectId, {});
+    assert.equal(result.specification.furniture[0].estimatedPrice, 1);
+  }
+});
+
+test("wrong furniture type and currency cannot bind semantic selection", () => {
+  const context = semanticContext();
+  const wrongObject = coffeeSpecification("candidate_1");
+  wrongObject.furniture[0].category = "sofa";
+  assert.deepEqual(catalogSelectionTestHelpers.resolveSemanticCatalogSelections(wrongObject, context, "USD").catalogSelectionsByObjectId, {});
+  context.selectionByKey.candidate_1.candidate.furnitureTypeCode = "sofa";
+  assert.deepEqual(catalogSelectionTestHelpers.resolveSemanticCatalogSelections(coffeeSpecification("candidate_1"), context, "USD").catalogSelectionsByObjectId, {});
+  assert.deepEqual(catalogSelectionTestHelpers.resolveSemanticCatalogSelections(coffeeSpecification("candidate_1"), semanticContext(), "CAD").catalogSelectionsByObjectId, {});
+});
+
+test("empty coffee pools and non-coffee furniture retain unmatched specification and null identity", () => {
+  const empty = createSemanticCatalogCandidateSelectionContext([{ planItemId: "table-1", candidates: [] }]);
+  const input = coffeeSpecification(null);
+  const result = catalogSelectionTestHelpers.resolveSemanticCatalogSelections(input, empty, "USD");
+  assert.deepEqual(result.specification, input);
+  assert.deepEqual(result.catalogSelectionsByObjectId, {});
+  const sofa = specification(null);
+  assert.deepEqual(catalogSelectionTestHelpers.resolveSemanticCatalogSelections(sofa, semanticContext(), "USD").specification, sofa);
 });

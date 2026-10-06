@@ -1,8 +1,10 @@
 import { z } from "zod";
 
-import type { CatalogCandidate } from "@/lib/catalog/schema";
+import type { CatalogCandidate, CatalogQuery } from "@/lib/catalog/schema";
 import { rankCatalogCandidates } from "@/lib/catalog/candidate-ranking";
 import { selectDiverseCatalogCandidates } from "@/lib/catalog/candidate-diversity";
+import { evaluateCatalogHardFilters } from "@/lib/catalog/hard-filter";
+import type { RoomConstrainedPlanItem } from "@/lib/furniture-planning/room-constraints";
 
 export type CatalogSelectionIdentity = {
   catalogProductId: string;
@@ -10,6 +12,88 @@ export type CatalogSelectionIdentity = {
 };
 
 export type CatalogSelectionsByObjectId = Record<string, CatalogSelectionIdentity>;
+
+export type CoffeeTableCandidatePool = {
+  planItemId: string;
+  candidates: CatalogCandidate[];
+};
+
+export type SemanticCatalogSelection = CatalogSelectionIdentity & {
+  planItemId: string;
+  candidate: CatalogCandidate;
+};
+
+export type SemanticCatalogSelectionContext = {
+  aiCandidatePools: Array<{ planItemId: string; candidates: AICatalogCandidate[] }>;
+  selectionByKey: Record<string, SemanticCatalogSelection>;
+};
+
+export function createCoffeeTableCatalogQuery(
+  item: RoomConstrainedPlanItem,
+  currency: string,
+): CatalogQuery | null {
+  if (resolveFurnitureTypeCode(item.normalizedCategory) !== "coffee_table"
+    || item.roomStatus !== "ready" || item.finalSearchRange === null) return null;
+  const range = item.finalSearchRange;
+  return {
+    countryCode: "US",
+    furnitureTypeCode: "coffee_table",
+    currency,
+    normalizedAvailability: "in_stock",
+    maxWidthCm: range.widthMaxCm,
+    maxDepthCm: range.depthMaxCm,
+    maxHeightCm: range.heightMaxCm,
+    limit: 30,
+  };
+}
+
+export function createCoffeeTableCandidatePool(
+  item: RoomConstrainedPlanItem,
+  candidates: CatalogCandidate[],
+  currency: string,
+): CoffeeTableCandidatePool {
+  const query = createCoffeeTableCatalogQuery(item, currency);
+  const range = item.finalSearchRange;
+  const eligible = query && range ? candidates.filter((candidate) => {
+    const dimensions = [candidate.widthCm, candidate.depthCm, candidate.heightCm];
+    return evaluateCatalogHardFilters(candidate, query).eligible
+      && dimensions.every((value) => value !== null && Number.isFinite(value) && value > 0)
+      && candidate.widthCm! >= range.widthMinCm
+      && candidate.depthCm! >= range.depthMinCm
+      && candidate.heightCm! >= range.heightMinCm
+      && candidate.roomaiSellingPrice !== null
+      && Number.isFinite(candidate.roomaiSellingPrice) && candidate.roomaiSellingPrice >= 0
+      && candidate.productId.trim() !== "" && candidate.variantId.trim() !== ""
+      && candidate.primaryImageUrl !== null
+      && /^https?:\/\//.test(candidate.primaryImageUrl)
+      && z.string().url().safeParse(candidate.primaryImageUrl).success;
+  }) : [];
+  return { planItemId: item.item.id, candidates: selectDesignCatalogCandidates([eligible]) };
+}
+
+export function createSemanticCatalogCandidateSelectionContext(
+  pools: CoffeeTableCandidatePool[],
+): SemanticCatalogSelectionContext {
+  const offered = pools.flatMap((pool) => pool.candidates.map((candidate) => ({
+    planItemId: pool.planItemId, candidate,
+  })));
+  const context = createCatalogCandidateSelectionContext(offered.map((entry) => entry.candidate));
+  const selectionByKey: Record<string, SemanticCatalogSelection> = {};
+  const aiCandidatePools = pools.map((pool) => ({
+    planItemId: pool.planItemId,
+    candidates: context.aiCandidates.filter((candidate, index) => {
+      const entry = offered[index];
+      if (entry.planItemId !== pool.planItemId) return false;
+      selectionByKey[candidate.catalogSelectionKey] = {
+        ...context.selectionByKey[candidate.catalogSelectionKey],
+        planItemId: entry.planItemId,
+        candidate: entry.candidate,
+      };
+      return true;
+    }),
+  }));
+  return { aiCandidatePools, selectionByKey };
+}
 
 export const aiCatalogCandidateSchema = z.object({
   catalogSelectionKey: z.string().min(1),

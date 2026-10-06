@@ -3,6 +3,10 @@ import { zodTextFormat } from "openai/helpers/zod";
 
 import {
   createCatalogCandidateSelectionContext,
+  createSemanticCatalogCandidateSelectionContext,
+  resolveFurnitureTypeCode,
+  type CoffeeTableCandidatePool,
+  type SemanticCatalogSelectionContext,
   type CatalogSelectionsByObjectId,
 } from "@/lib/catalog/integration";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
@@ -11,6 +15,7 @@ import type { DesignSpecification } from "@/lib/designs/types";
 import { getWallLengthCm, getWallOrientation } from "@/lib/geometry/dimensions";
 import type { RoomGeometry, RoomOpening } from "@/lib/geometry/types";
 import type { Tables } from "@/types/database.types";
+import type { FurniturePlanV11 } from "@/lib/furniture-planning/types";
 
 export const DESIGN_PROMPT_VERSION = "roomai-design-v2";
 export const DESIGN_MODEL = "gpt-4o-mini";
@@ -194,6 +199,7 @@ function resolveCatalogSelections(
 export async function generateDesignSpecification(
   brief: DesignBrief,
   catalogCandidates: CatalogCandidate[] = [],
+  semanticGrounding?: { plan: FurniturePlanV11; candidatePools: CoffeeTableCandidatePool[] },
 ) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -202,8 +208,18 @@ export async function generateDesignSpecification(
 
   const openai = new OpenAI({ apiKey });
   const { aiCandidates, selectionByKey } = createCatalogCandidateSelectionContext(catalogCandidates);
-  const catalogGrounding = aiCandidates.length > 0
-    ? `\n\nAvailable real catalog candidates:\n${JSON.stringify(aiCandidates)}\n\nThe supplied catalog candidates are real available products for design grounding. Use their real title, dimensions, material, color, style, and RoomAI selling price when useful. A furniture object may select one supplied candidate by returning its exact catalogSelectionKey. If no suitable candidate exists, return catalogSelectionKey: null. Do not invent selection keys, product IDs, variant IDs, additional catalog identity, or exact availability; catalog identity persistence is resolved server-side after generation.`
+  const semanticContext = semanticGrounding
+    ? createSemanticCatalogCandidateSelectionContext(semanticGrounding.candidatePools)
+    : null;
+  const visibleCandidates = semanticContext ? semanticContext.aiCandidatePools : aiCandidates;
+  const hasCandidates = semanticContext
+    ? semanticContext.aiCandidatePools.some((pool) => pool.candidates.length > 0)
+    : aiCandidates.length > 0;
+  const catalogGrounding = hasCandidates
+    ? `\n\nAvailable real catalog candidates:\n${JSON.stringify(visibleCandidates)}\n\nThe supplied catalog candidates are real available products for design grounding. Use their real title, dimensions, material, color, style, and RoomAI selling price when useful. A furniture object may select one supplied candidate by returning its exact catalogSelectionKey. If no suitable candidate exists, return catalogSelectionKey: null. Do not invent selection keys, product IDs, variant IDs, additional catalog identity, or exact availability; catalog identity persistence is resolved server-side after generation.`
+    : "";
+  const semanticPlanning = semanticGrounding
+    ? `\n\nAuthoritative semantic furniture plan:\n${JSON.stringify(semanticGrounding.plan)}\n\nPreserve plan item IDs as furniture objectId values and preserve their semantic placement intent. Each candidate pool belongs only to its planItemId. Only coffee_table objects may select those candidates, and only from their own pool. When a suitable candidate exists, select its key and use its exact dimensions and customer price in the project currency. Unknown normalized material or color is not a verified catalog fact; do not invent catalog metadata. For empty pools and all other furniture types, keep catalogSelectionKey null and continue the unmatched design behavior.`
     : "";
   const response = await openai.responses.parse({
     model: DESIGN_MODEL,
@@ -211,7 +227,7 @@ export async function generateDesignSpecification(
       { role: "system", content: designInstructions },
       {
         role: "user",
-        content: `Design brief:\n${JSON.stringify(brief)}\n\nGeometry summary:\n${brief.geometrySummary}${catalogGrounding}`,
+        content: `Design brief:\n${JSON.stringify(brief)}\n\nGeometry summary:\n${brief.geometrySummary}${semanticPlanning}${catalogGrounding}`,
       },
     ],
     text: {
@@ -229,10 +245,50 @@ export async function generateDesignSpecification(
     throw new Error("AI_INVALID_RESPONSE");
   }
 
-  return resolveCatalogSelections(parsed.data, selectionByKey);
+  return semanticContext
+    ? resolveSemanticCatalogSelections(parsed.data, semanticContext, brief.project.currency)
+    : resolveCatalogSelections(parsed.data, selectionByKey);
+}
+
+function resolveSemanticCatalogSelections(
+  specification: DesignSpecification,
+  context: SemanticCatalogSelectionContext,
+  currency: string,
+) {
+  const catalogSelectionsByObjectId: CatalogSelectionsByObjectId = {};
+  const furniture = specification.furniture.map((object) => {
+    const key = object.catalogSelectionKey;
+    if (key === null) return object;
+    const selection = Object.hasOwn(context.selectionByKey, key) ? context.selectionByKey[key] : undefined;
+    const candidate = selection?.candidate;
+    if (!selection || !candidate || selection.planItemId !== object.objectId
+      || resolveFurnitureTypeCode(object.category) !== "coffee_table"
+      || resolveFurnitureTypeCode(candidate.furnitureTypeCode ?? "") !== "coffee_table"
+      || candidate.currency?.trim().toUpperCase() !== currency
+      || ![candidate.widthCm, candidate.depthCm, candidate.heightCm].every((value) => value !== null && Number.isFinite(value) && value > 0)
+      || candidate.roomaiSellingPrice === null || !Number.isFinite(candidate.roomaiSellingPrice) || candidate.roomaiSellingPrice < 0) {
+      return { ...object, catalogSelectionKey: null };
+    }
+    catalogSelectionsByObjectId[object.objectId] = {
+      catalogProductId: selection.catalogProductId,
+      catalogProductVariantId: selection.catalogProductVariantId,
+    };
+    return {
+      ...object,
+      dimensions: { widthCm: candidate.widthCm!, depthCm: candidate.depthCm!, heightCm: candidate.heightCm! },
+      estimatedPrice: candidate.roomaiSellingPrice,
+    };
+  });
+  const selected = Object.keys(catalogSelectionsByObjectId).length > 0;
+  const result = designSpecificationSchema.parse({
+    ...specification, furniture,
+    budget: selected ? { ...specification.budget, currency } : specification.budget,
+  });
+  return { specification: result, catalogSelectionsByObjectId };
 }
 
 export const catalogSelectionTestHelpers = {
   createCatalogCandidateSelectionContext,
   resolveCatalogSelections,
+  resolveSemanticCatalogSelections,
 };
