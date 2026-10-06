@@ -1,6 +1,7 @@
 import pytest
 
 from crawler.core.catalog_coverage import (
+    E11_P0_MINIMUM_VIABLE_COVERAGE_PLAN,
     US_INITIAL_COVERAGE_PLAN,
     CoverageTarget,
     build_coverage_plan,
@@ -45,6 +46,30 @@ def test_initial_us_plan_covers_every_canonical_type_once():
     assert {target.furniture_type_code for target in US_INITIAL_COVERAGE_PLAN.targets} == set(CANONICAL_TYPES)
     assert {target.market_code for target in US_INITIAL_COVERAGE_PLAN.targets} == {"US"}
     assert {target.priority for target in US_INITIAL_COVERAGE_PLAN.targets} == {"critical", "high", "normal"}
+
+
+def test_e11_p0_inventory_contract_contains_only_approved_types_and_targets():
+    expected = ("accent_chair", "area_rug", "coffee_table", "sectional_sofa", "sofa")
+    targets = E11_P0_MINIMUM_VIABLE_COVERAGE_PLAN.targets
+
+    assert tuple(target.furniture_type_code for target in targets) == expected
+    assert len(targets) == 5
+    assert {target.market_code for target in targets} == {"US"}
+    assert all(target.furniture_type_code in CANONICAL_TYPES for target in targets)
+    assert all(target.minimum_ready_variants == 4 for target in targets)
+    assert all(target.minimum_distinct_products == 3 for target in targets)
+    assert all(target.priority == "critical" for target in targets)
+
+
+def test_e11_p0_inventory_contract_order_is_deterministic():
+    reversed_plan = build_coverage_plan(list(reversed(E11_P0_MINIMUM_VIABLE_COVERAGE_PLAN.targets)))
+    assert reversed_plan == E11_P0_MINIMUM_VIABLE_COVERAGE_PLAN
+
+
+@pytest.mark.parametrize("minimum_ready_variants", [0, -1, True])
+def test_coverage_target_rejects_invalid_ready_variant_contract(minimum_ready_variants):
+    with pytest.raises(ValueError):
+        CoverageTarget("US", "sofa", 3, "critical", minimum_ready_variants)
 
 
 def test_coverage_report_handles_empty_partial_exact_surplus_unknown_and_summary():

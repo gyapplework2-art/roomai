@@ -7,6 +7,7 @@ import {
   resolveFurnitureTypeCode,
   selectDesignCatalogCandidates,
 } from "@/lib/catalog/integration";
+import { furnitureRoles } from "@/lib/furniture-planning/semantic-types";
 import { catalogSelectionTestHelpers } from "@/lib/designs/generation";
 import { furnitureObjectSchema } from "@/lib/designs/schema";
 import type { DesignSpecification } from "@/lib/designs/types";
@@ -43,11 +44,44 @@ const candidate = (variantId: string) => ({
   primaryImageUrl: "https://example.com/images/test-product.jpg",
 });
 
-test("resolves only supported furniture type aliases", () => {
-  assert.equal(resolveFurnitureTypeCode("rug"), "area_rug");
-  assert.equal(resolveFurnitureTypeCode(" Area   Rug "), "area_rug");
-  assert.equal(resolveFurnitureTypeCode("area_rug"), "area_rug");
-  assert.equal(resolveFurnitureTypeCode("sofa"), "sofa");
+test("resolves approved P0 catalog codes and customer/design aliases", () => {
+  const mappings = [
+    ["sofa", "sofa"],
+    ["sectional", "sectional_sofa"],
+    ["sectional_sofa", "sectional_sofa"],
+    ["accent chair", "accent_chair"],
+    ["accent_chair", "accent_chair"],
+    ["armchair", "accent_chair"],
+    ["coffee table", "coffee_table"],
+    ["coffee_table", "coffee_table"],
+    ["rug", "area_rug"],
+    ["area rug", "area_rug"],
+    ["area_rug", "area_rug"],
+  ] as const;
+  for (const [input, expected] of mappings) assert.equal(resolveFurnitureTypeCode(input), expected);
+});
+
+test("normalizes case, whitespace, hyphens, and underscores without fuzzy matching", () => {
+  assert.equal(resolveFurnitureTypeCode("  SECTIONAL   SOFA "), "sectional_sofa");
+  assert.equal(resolveFurnitureTypeCode("Sectional-Sofa"), "sectional_sofa");
+  assert.equal(resolveFurnitureTypeCode("ACCENT_CHAIR"), "accent_chair");
+  assert.equal(resolveFurnitureTypeCode("Coffee-Table"), "coffee_table");
+  assert.equal(resolveFurnitureTypeCode("Area_Rug"), "area_rug");
+  for (const unsupported of ["chair", "sofa bed", "ottoman", "PRIMARY_SEATING", "SECONDARY_SEATING", "plant"]) {
+    assert.equal(resolveFurnitureTypeCode(unsupported), null);
+  }
+});
+
+test("semantic role identifiers remain distinct from catalog furniture types", () => {
+  assert.deepEqual(furnitureRoles, [
+    "PRIMARY_SEATING", "SECONDARY_SEATING", "COFFEE_TABLE", "SIDE_TABLE", "AREA_RUG",
+    "MEDIA_CONSOLE", "STORAGE", "TASK_LIGHTING", "AMBIENT_LIGHTING",
+  ]);
+  assert.equal(resolveFurnitureTypeCode("PRIMARY_SEATING"), null);
+  assert.equal(resolveFurnitureTypeCode("SECONDARY_SEATING"), null);
+  assert.equal(resolveFurnitureTypeCode("SIDE_TABLE"), null);
+  assert.equal(resolveFurnitureTypeCode("TASK_LIGHTING"), null);
+  assert.equal(resolveFurnitureTypeCode("AMBIENT_LIGHTING"), null);
 });
 
 test("deduplicates catalog candidates by variantId", () => {

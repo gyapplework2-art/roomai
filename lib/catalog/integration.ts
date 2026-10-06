@@ -37,12 +37,16 @@ export type AICatalogCandidate = z.infer<typeof aiCatalogCandidateSchema>;
 const FURNITURE_TYPE_ALIASES: Record<string, string> = {
   rug: "area_rug",
   "area rug": "area_rug",
-  area_rug: "area_rug",
   sofa: "sofa",
+  sectional: "sectional_sofa",
+  "sectional sofa": "sectional_sofa",
+  "accent chair": "accent_chair",
+  armchair: "accent_chair",
+  "coffee table": "coffee_table",
 };
 
 export function resolveFurnitureTypeCode(value: string): string | null {
-  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
+  const normalized = value.trim().toLowerCase().replace(/[\/_-]+/g, " ").replace(/\s+/g, " ");
   return FURNITURE_TYPE_ALIASES[normalized] ?? null;
 }
 

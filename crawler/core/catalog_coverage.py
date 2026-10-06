@@ -15,6 +15,8 @@ class CoverageTarget:
     furniture_type_code: str
     target_product_count: int
     priority: CoveragePriority
+    # Static target only; the existing product coverage report does not measure readiness.
+    minimum_ready_variants: int | None = None
 
     def __post_init__(self) -> None:
         if not self.market_code.strip():
@@ -23,8 +25,19 @@ class CoverageTarget:
             raise ValueError("furniture_type_code must be canonical.")
         if isinstance(self.target_product_count, bool) or not isinstance(self.target_product_count, int) or self.target_product_count < 1:
             raise ValueError("target_product_count must be at least 1.")
+        if self.minimum_ready_variants is not None and (
+            isinstance(self.minimum_ready_variants, bool)
+            or not isinstance(self.minimum_ready_variants, int)
+            or self.minimum_ready_variants < 1
+        ):
+            raise ValueError("minimum_ready_variants must be at least 1 when specified.")
         if self.priority not in _PRIORITY_ORDER:
             raise ValueError("priority must be critical, high, normal, or low.")
+
+    @property
+    def minimum_distinct_products(self) -> int:
+        """The existing product-count target counts distinct catalog products."""
+        return self.target_product_count
 
 
 @dataclass(frozen=True)
@@ -83,6 +96,20 @@ def _ordered_targets(targets: tuple[CoverageTarget, ...]) -> tuple[CoverageTarge
 
 def build_coverage_plan(targets: tuple[CoverageTarget, ...] | list[CoverageTarget]) -> CatalogCoveragePlan:
     return CatalogCoveragePlan(_ordered_targets(tuple(targets)))
+
+
+E11_P0_MINIMUM_VIABLE_COVERAGE_PLAN = build_coverage_plan(
+    tuple(
+        CoverageTarget(
+            market_code="US",
+            furniture_type_code=furniture_type_code,
+            target_product_count=3,
+            priority="critical",
+            minimum_ready_variants=4,
+        )
+        for furniture_type_code in ("sofa", "sectional_sofa", "accent_chair", "coffee_table", "area_rug")
+    )
+)
 
 
 def _targets_for_priority(priority: CoveragePriority, count: int, types: tuple[str, ...]) -> tuple[CoverageTarget, ...]:
