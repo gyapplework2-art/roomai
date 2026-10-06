@@ -201,6 +201,10 @@ def test_httpx_quality_transport_is_get_only(monkeypatch):
 
     select = captured["params"]["select"]
     assert "catalog_product_variants" in select
+    assert "catalog_vendor_markets" in select
+    assert "catalog_countries" in select
+    assert "default_currency" in select
     assert "catalog_product_dimensions" in select
     assert "catalog_current_offers" in select
+    assert "catalog_customer_prices" in select
     assert "catalog_product_images" in select

@@ -47,6 +47,10 @@ class HttpxCatalogQualityAuditTransport:
                 "needs_taxonomy_review",
                 "catalog_furniture_types(code)",
                 (
+                    "catalog_vendor_markets!inner(is_active,"
+                    "catalog_countries!inner(country_code,default_currency,is_supported))"
+                ),
+                (
                     "catalog_product_variants("
                     "id,vendor_sku,vendor_variant_id,variant_name,"
                     "source_color,normalized_color,"
@@ -57,6 +61,7 @@ class HttpxCatalogQualityAuditTransport:
                     "currency,vendor_list_price,vendor_sale_price,"
                     "normalized_availability,checked_at"
                     "),"
+                    "catalog_customer_prices(currency,roomai_selling_price),"
                     "catalog_product_images(id,source_url)"
                     ")"
                 ),
