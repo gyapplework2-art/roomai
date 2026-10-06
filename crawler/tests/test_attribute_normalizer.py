@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from crawler.core.attribute_normalizer import normalize_boolean, normalize_color, normalize_cushion_fill, normalize_material, normalize_style
+from crawler.core.attribute_normalizer import normalize_boolean, normalize_color, normalize_cushion_fill, normalize_material, normalize_material_composition, normalize_style
 from crawler.core.evidence_resolution import AttributeCandidate, resolve_attribute, variant_attribute_candidates
 from crawler.core.normalizer import normalize_product
 from crawler.models.product import CatalogProduct, CatalogVariant
@@ -1153,6 +1153,98 @@ def test_d3a19_explicit_vendor_color_terms_map_to_controlled_colors(
 )
 def test_d3a19_composite_materials_remain_unresolved(source: str):
     assert normalize_material(source) is None
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("Solid and veneered oak, MDF, plywood, steel", [
+            {"material": "oak", "qualifiers": ["solid", "veneer"]},
+            {"material": "mdf", "qualifiers": []},
+            {"material": "plywood", "qualifiers": []},
+            {"material": "steel", "qualifiers": []},
+        ]),
+        ("Solid and veneered ash, MDF, plywood", [
+            {"material": "ash", "qualifiers": ["solid", "veneer"]},
+            {"material": "mdf", "qualifiers": []},
+            {"material": "plywood", "qualifiers": []},
+        ]),
+        ("Solid beech, MDF, walnut veneer", [
+            {"material": "beech", "qualifiers": ["solid"]},
+            {"material": "mdf", "qualifiers": []},
+            {"material": "walnut", "qualifiers": ["veneer"]},
+        ]),
+        ("Solid and veneered white oak, MDF, steel hardware", [
+            {"material": "oak", "qualifiers": ["solid", "veneer"], "species": "white_oak"},
+            {"material": "mdf", "qualifiers": []},
+            {"material": "steel", "qualifiers": [], "role": "hardware"},
+        ]),
+        ("70% wool, 30% cotton", [
+            {"material": "wool", "qualifiers": [], "percentage": 70.0},
+            {"material": "cotton", "qualifiers": [], "percentage": 30.0},
+        ]),
+        ("wood and steel", [{"material": "wood", "qualifiers": []}, {"material": "steel", "qualifiers": []}]),
+        ("oak & brass", [{"material": "oak", "qualifiers": []}, {"material": "brass", "qualifiers": []}]),
+        ("marble/metal", [{"material": "marble", "qualifiers": []}, {"material": "metal", "qualifiers": []}]),
+    ],
+)
+def test_complete_material_composition_preserves_qualifiers_and_evidence(source, expected):
+    assert normalize_material(source) is None
+    assert normalize_material_composition(source) == expected
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Coffee table", source_category="Coffee tables",
+        product_url="https://example.com/table",
+        variants=[CatalogVariant(variant_attributes={"article_html_specifications": {"Materials": source}})],
+    )
+    result = normalize_product(product)
+    variant = result.product.variants[0]
+    assert variant.source_material == source
+    assert variant.normalized_material is None
+    assert variant.variant_attributes["material_composition"] == expected
+    assert variant.variant_attributes["article_html_specifications"]["Materials"] == source
+    assert variant.variant_attributes["attribute_evidence"]["material"][0]["source"] == "labeled_html"
+    assert variant.variant_attributes["normalized_attributes"] == {}
+    assert "unknown_material" not in result.review_reasons
+
+
+@pytest.mark.parametrize("source", [
+    "oak, mystery resin", "70% wool, 30% viscose", "steel,", "oak and", "solid",
+    "80% cotton, 30% wool", "20% cotton, 30% wool", "0% cotton, 100% wool",
+    "oak tabletop, steel", "finished oak, MDF",
+])
+def test_incomplete_material_composition_fails_closed(source):
+    assert normalize_material_composition(source) is None
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Coffee table", source_category="Coffee tables",
+        product_url="https://example.com/table", variants=[CatalogVariant(source_material=source)],
+    )
+    result = normalize_product(product)
+    assert "unknown_material" in result.review_reasons
+    assert "material_composition" not in result.product.variants[0].variant_attributes
+
+
+@pytest.mark.parametrize("source", ["leather", "oak", "walnut", "steel", "ash", "beech"])
+def test_simple_materials_keep_scalar_representation(source):
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Coffee table", source_category="Coffee tables",
+        product_url="https://example.com/table", variants=[CatalogVariant(source_material=source)],
+    )
+    result = normalize_product(product)
+    assert result.product.variants[0].normalized_material == source
+    assert "material_composition" not in result.product.variants[0].variant_attributes
+
+
+def test_stale_composition_cannot_bypass_unknown_material_review():
+    product = CatalogProduct(
+        vendor_market_code="US", source_product_name="Coffee table", source_category="Coffee tables",
+        product_url="https://example.com/table", variants=[CatalogVariant(
+            source_material="oak, unknown resin",
+            variant_attributes={"material_composition": [{"material": "oak", "qualifiers": []}]},
+        )],
+    )
+    result = normalize_product(product)
+    assert "unknown_material" in result.review_reasons
+    assert "material_composition" not in result.product.variants[0].variant_attributes
 
 
 def test_d3a19_dark_fleck_is_not_inferred_as_gray():

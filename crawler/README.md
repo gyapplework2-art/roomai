@@ -24,6 +24,14 @@ future approved catalog identity
 
 `crawler/core/normalizer.py` deterministically normalizes explicitly supplied units, source colors/materials, and availability while preserving every source value. Unknown units or terms remain unnormalized and are flagged for review; names are never mined for attributes.
 
+### Material Composition
+
+`normalized_material` retains its single-material meaning. Complete compound descriptions instead populate `variant_attributes.material_composition`, an ordered array of constituents with `material` and `qualifiers` fields. Qualifiers preserve explicit `solid` and `veneer` wording; optional `species`, `role`, and numeric `percentage` fields preserve white-oak specificity, explicitly labeled hardware, and stated proportions. No tabletop, base, frame, or upholstery role is inferred. The source string and selected evidence remain unchanged.
+
+Parsing uses the shared controlled vocabulary, including the wood species ash and beech, with exact matches after case/whitespace/hyphen normalization. Commas, `and`, `/`, and `&` separate constituents; `solid and veneered` applies both qualifiers to the following material. Unknown meaningful text or empty constituents reject the entire composition. Stated percentages must be positive and at most 100; their sum cannot exceed 100 and must equal 100 when every constituent has a percentage. Unspecified proportions remain unspecified. Viscose remains unsupported, so `70% wool, 30% viscose` still requires review.
+
+A complete composition satisfies ingestion material validation and catalog quality checks without filling the scalar field. Persisted quality checks require the stored composition to match a complete parse of its source. The existing variant JSON and persistence plan retain this representation without a migration. Scalar catalog/aesthetic consumers do not yet consume composition and continue to report unknown material where no scalar exists.
+
 `crawler/core/product_resolver.py` produces conservative, non-mutating proposals from explicit vendor, market, identifier, and Article `isRelatedTo` evidence. A related Article record is `related_only`, not an automatic product-family or variant merge. No permanent catalog identity is assigned at this stage.
 
 ## 6B.3B.6 Catalog Persistence Plans

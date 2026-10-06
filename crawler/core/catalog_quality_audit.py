@@ -9,6 +9,7 @@ from typing import Protocol
 
 import httpx
 
+from crawler.core.attribute_normalizer import has_normalized_material_composition
 from crawler.core.config import CrawlerSettings, get_settings
 from crawler.core.supabase_repository import RestResponse, _response
 
@@ -54,7 +55,7 @@ class HttpxCatalogQualityAuditTransport:
                     "catalog_product_variants("
                     "id,vendor_sku,vendor_variant_id,variant_name,"
                     "source_color,normalized_color,"
-                    "source_material,normalized_material,"
+                    "source_material,normalized_material,variant_attributes,"
                     "publication_status,is_active,"
                     "catalog_product_dimensions(width_cm,depth_cm,height_cm),"
                     "catalog_current_offers("
@@ -309,8 +310,9 @@ def _audit_variant(row: dict[str, object]) -> PersistedVariantQuality:
     ):
         design.append("normalized_color_missing")
 
-    if _non_blank(row.get("source_material")) and not _non_blank(
-        row.get("normalized_material")
+    source_material = row.get("source_material")
+    if _non_blank(source_material) and not _non_blank(row.get("normalized_material")) and not has_normalized_material_composition(
+        source_material if isinstance(source_material, str) else None, row.get("variant_attributes"),
     ):
         design.append("normalized_material_missing")
 

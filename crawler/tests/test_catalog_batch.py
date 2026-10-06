@@ -40,6 +40,36 @@ def candidates():
     ]
 
 
+def test_captured_compound_materials_pass_local_article_intake_without_execution():
+    materials = [
+        "Solid and veneered oak, MDF, plywood, steel",
+        "Solid and veneered oak, MDF, plywood, steel",
+        "Solid and veneered ash, MDF, plywood",
+        "Solid beech, MDF, walnut veneer",
+        "oak, unknown resin",
+    ]
+
+    class MaterialFetcher:
+        async def fetch(self, url):
+            index = int(url.rsplit("/", 1)[1])
+            node = {"@type": "Product", "name": "Coffee Table", "sku": f"LOCAL-{index}", "category": "Coffee tables", "url": url}
+            html = '<script type="application/ld+json">' + json.dumps(node) + '</script>'
+            html += '<div class="specs-rows"><div class="specs-title">Materials</div><div class="specs-value">' + materials[index] + '</div></div>'
+            return FetchResult(url, url, 200, html, "text/html", datetime.now(timezone.utc), 1)
+
+    result = run(intake_candidates(
+        [{"product_url": f"https://example.com/product/{index}", "furniture_type_code": "coffee_table"} for index in range(len(materials))],
+        adapter=ArticleVendorAdapter("US"), fetcher=MaterialFetcher(), limit=len(materials),
+    ))
+    assert [item.status for item in result.items] == ["ready"] * 4 + ["review_required"]
+    assert result.items[-1].review_reasons == ("unknown_material",)
+    for item, source in zip(result.ready, materials):
+        assert item.product.variants[0].variant_attributes["article_html_specifications"]["Materials"] == source
+        assert item.plan.variants[0].values["source_material"] == source
+        assert item.plan.variants[0].values["normalized_material"] is None
+        assert item.plan.variants[0].values["variant_attributes"]["material_composition"]
+
+
 def persistence_plans(count):
     source = (FIXTURES / "normal_sofa.html").read_text()
     parsed = ArticleVendorAdapter("US").parse_product(

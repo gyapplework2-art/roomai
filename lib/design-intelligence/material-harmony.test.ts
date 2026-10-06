@@ -73,6 +73,12 @@ test("normalizes supported design-language material aliases", () => {
   });
 });
 
+test("recognizes canonical ash and beech as wood species", () => {
+  for (const value of ["ash", "beech"]) {
+    assert.deepEqual(normalizeDesignMaterial(value), { value, family: "wood" });
+  }
+});
+
 test("exact preferred material match is compatible", () => {
   const result = evaluateCandidateMaterialHarmony(
     intent(["linen"]),

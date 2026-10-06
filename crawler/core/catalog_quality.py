@@ -6,6 +6,7 @@ changing persistence behavior, or making aesthetic judgments.
 
 from dataclasses import dataclass
 
+from crawler.core.attribute_normalizer import has_normalized_material_composition
 from crawler.core.normalizer import normalize_product
 from crawler.models.product import CatalogProduct, CatalogVariant
 
@@ -137,7 +138,9 @@ def _evaluate_variant(
     if variant.source_color and not variant.normalized_color:
         design_gaps.append("normalized_color_missing")
 
-    if variant.source_material and not variant.normalized_material:
+    if variant.source_material and not variant.normalized_material and not has_normalized_material_composition(
+        variant.source_material, variant.variant_attributes,
+    ):
         design_gaps.append("normalized_material_missing")
 
     return VariantQualityResult(

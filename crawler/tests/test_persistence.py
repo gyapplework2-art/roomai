@@ -1,9 +1,11 @@
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 
 import pytest
 
 from crawler.core.persistence import build_persistence_plan
+from crawler.core.normalizer import normalize_product
 from crawler.vendors.article import ArticleVendorAdapter
 
 
@@ -87,3 +89,25 @@ def test_missing_vendor_identity_fails_clearly():
 
     with pytest.raises(ValueError, match="explicit source vendor"):
         build_persistence_plan(product)
+
+
+def test_material_composition_survives_plan_json_and_product_serialization():
+    source = "Solid and veneered oak, MDF, plywood, steel"
+    product = article_product("normal_sofa.html")
+    product = product.model_copy(update={"variants": [product.variants[0].model_copy(update={
+        "source_material": source,
+    })]})
+    plan = build_persistence_plan(product)
+    values = json.loads(json.dumps(plan.variants[0].values))
+    assert values["source_material"] == source
+    assert values["normalized_material"] is None
+    assert values["variant_attributes"]["material_composition"] == [
+        {"material": "oak", "qualifiers": ["solid", "veneer"]},
+        {"material": "mdf", "qualifiers": []},
+        {"material": "plywood", "qualifiers": []},
+        {"material": "steel", "qualifiers": []},
+    ]
+    assert values["variant_attributes"]["attribute_evidence"]["material"][0]["value"] == source
+    assert "unknown_material" not in plan.review_reasons
+    normalized = normalize_product(product).product
+    assert json.loads(normalized.model_dump_json())["variants"][0]["variant_attributes"]["material_composition"] == values["variant_attributes"]["material_composition"]

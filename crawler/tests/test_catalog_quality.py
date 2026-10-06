@@ -71,6 +71,15 @@ def test_complete_product_passes_quality_gate_and_is_design_ready():
     assert result.variants[0].design_ready is True
 
 
+def test_complete_composition_satisfies_material_quality_without_scalar():
+    variant = _complete_variant().model_copy(update={
+        "source_material": "Solid beech, MDF, walnut veneer", "normalized_material": None,
+    })
+    result = evaluate_catalog_quality(_product(variants=[variant]))
+    assert result.design_ready is True
+    assert "normalized_material_missing" not in result.variants[0].design_gaps
+
+
 def test_unresolved_taxonomy_is_blocking():
     product = _product(
         furniture_type=None,
@@ -182,7 +191,7 @@ def test_unresolved_source_color_is_design_gap():
 def test_unresolved_source_material_is_design_gap():
     variant = _complete_variant().model_copy(
         update={
-            "source_material": "Oak, steel hardware",
+            "source_material": "Oak, unknown resin",
             "normalized_material": None,
         }
     )
@@ -190,6 +199,14 @@ def test_unresolved_source_material_is_design_gap():
     result = evaluate_catalog_quality(_product(variants=[variant]))
 
     assert "normalized_material_missing" in result.variants[0].design_gaps
+
+
+def test_explicit_steel_hardware_composition_is_no_longer_unresolved():
+    variant = _complete_variant().model_copy(update={
+        "source_material": "Oak, steel hardware", "normalized_material": None,
+    })
+    result = evaluate_catalog_quality(_product(variants=[variant]))
+    assert result.design_ready is True
 
 
 def test_quality_evaluation_does_not_mutate_source_product():

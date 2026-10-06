@@ -10,6 +10,7 @@ from crawler.core.catalog_quality_audit import (
     load_catalog_quality_audit,
 )
 from crawler.core.supabase_repository import RestResponse
+from crawler.core.attribute_normalizer import normalize_material_composition
 
 
 def _row():
@@ -65,6 +66,21 @@ def test_complete_persisted_product_is_design_ready():
         "products_commercially_complete": 1,
         "products_design_ready": 1,
     }
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_persisted_composition_must_match_complete_source_parse(valid):
+    row = _row()
+    variant = row["catalog_product_variants"][0]
+    source = "Solid beech, MDF, walnut veneer" if valid else "beech, unknown resin"
+    variant["source_material"] = source
+    variant["normalized_material"] = None
+    variant["variant_attributes"] = {
+        "material_composition": normalize_material_composition("Solid beech, MDF, walnut veneer"),
+    }
+    result = audit_quality_rows([row]).products[0]
+    assert result.design_ready is valid
+    assert ("normalized_material_missing" in result.variants[0].design_gaps) is not valid
 
 
 def test_missing_taxonomy_blocks_product():

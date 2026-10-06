@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
-from crawler.core.attribute_normalizer import normalize_color, normalize_material, normalize_style
+from crawler.core.attribute_normalizer import normalize_color, normalize_material, normalize_material_composition, normalize_style
 from crawler.core.design_attributes import normalized_identity_design_attributes, normalized_labeled_design_attributes
 from crawler.core.evidence_resolution import resolve_attribute, variant_attribute_candidates
 from crawler.core.taxonomy import resolve_furniture_type
@@ -97,9 +97,11 @@ def _normalize_variant(
     selected_color = color.selected.value if color.selected else None
     selected_material = material.selected.value if material.selected else None
     selected_style = style.selected.value if style.selected else None
+    normalized_material = normalize_material(selected_material)
+    composition = normalize_material_composition(selected_material) if normalized_material is None else None
     if selected_color and normalize_color(selected_color) is None:
         reasons.append("unknown_color")
-    if selected_material and normalize_material(selected_material) is None:
+    if selected_material and normalized_material is None and composition is None:
         reasons.append("unknown_material")
     if selected_style and normalize_style(selected_style) is None:
         reasons.append("unknown_style")
@@ -119,10 +121,11 @@ def _normalize_variant(
         "source_material": selected_material,
         "source_style": selected_style,
         "normalized_color": normalize_color(selected_color),
-        "normalized_material": normalize_material(selected_material),
+        "normalized_material": normalized_material,
         "normalized_style": normalize_style(selected_style),
         "variant_attributes": {
-            **variant.variant_attributes,
+            **{key: value for key, value in variant.variant_attributes.items() if key != "material_composition"},
+            **({"material_composition": composition} if composition is not None else {}),
             "normalized_attributes": normalized_attributes,
             "attribute_evidence": evidence,
         },

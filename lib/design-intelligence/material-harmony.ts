@@ -48,6 +48,8 @@ const MATERIAL_FAMILY_BY_VALUE: Record<string, DesignMaterialFamily> = {
   wood: "wood",
   oak: "wood",
   walnut: "wood",
+  ash: "wood",
+  beech: "wood",
   acacia: "wood",
   teak: "wood",
 
