@@ -12,6 +12,7 @@ import {
   persistDesign,
 } from "@/lib/designs/persistence";
 import type { DesignSpecification } from "@/lib/designs/types";
+import { correctGeneratedDesignPlacement, type PlacementDiagnostic } from "@/lib/designs/placement";
 import { roomGeometrySchema, roomOpeningSchema } from "@/lib/geometry/schema";
 import { validateRoomOpenings } from "@/lib/geometry/openings";
 import { validateRoomGeometryStructure } from "@/lib/geometry/validation";
@@ -24,6 +25,7 @@ import { constrainFurniturePlanToRoom } from "@/lib/furniture-planning/room-cons
 
 type GenerationResult =
   | { success: true; designId: string; version: number; specification: DesignSpecification }
+  | { success: false; error: "placement_unresolved"; diagnostics: PlacementDiagnostic[] }
   | {
       success: false;
       error: "not_configured" | "not_found" | "missing_layout" | "invalid_layout" | "provider_failure" | "invalid_response" | "persistence_failed";
@@ -149,7 +151,12 @@ export async function generateDesign(projectId: string): Promise<GenerationResul
       [],
       { plan, candidatePools },
     );
-    specification = generation.specification;
+    const placement = correctGeneratedDesignPlacement(generation.specification, plan, geometryParsed.data, openings);
+    if (!placement.ok) {
+      console.error("RoomAI generated placement unresolved", JSON.stringify({ projectId, diagnostics: placement.diagnostics }));
+      return { success: false, error: "placement_unresolved", diagnostics: placement.diagnostics };
+    }
+    specification = placement.specification;
     catalogSelectionsByObjectId = generation.catalogSelectionsByObjectId;
   } catch (error) {
     if (error instanceof Error && error.message === "AI_NOT_CONFIGURED") {

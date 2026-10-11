@@ -142,7 +142,11 @@ test("builds a deterministic brief with authoritative room and placement data", 
   const second = createBrief();
 
   assert.deepEqual(first, second);
-  assert.deepEqual(first.room.polygon, geometry.vertices.map(({ xCm, yCm }) => ({ xCm, yCm })));
+  assert.deepEqual(first.room.polygon, geometry.vertices.map(({ id, xCm, yCm }) => ({ id, xCm, yCm })));
+  for (const wall of first.room.walls) {
+    assert.ok(first.room.polygon.some((vertex) => vertex.id === wall.startVertexId));
+    assert.ok(first.room.polygon.some((vertex) => vertex.id === wall.endVertexId));
+  }
   assert.deepEqual(first.room.walls, geometry.wallSegments);
   assert.deepEqual(first.room.openings[0], {
     openingType: "door",

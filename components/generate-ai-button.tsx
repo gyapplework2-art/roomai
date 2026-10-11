@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { generateDesign } from "@/lib/designs/actions";
 
-function errorMessage(error: "not_configured" | "not_found" | "missing_layout" | "invalid_layout" | "provider_failure" | "invalid_response" | "persistence_failed") {
+function errorMessage(error: "not_configured" | "not_found" | "missing_layout" | "invalid_layout" | "provider_failure" | "invalid_response" | "persistence_failed" | "placement_unresolved") {
   switch (error) {
     case "not_configured":
       return "AI generation is not configured.";
@@ -20,6 +20,8 @@ function errorMessage(error: "not_configured" | "not_found" | "missing_layout" |
       return "The AI returned an invalid design. Please try again.";
     case "persistence_failed":
       return "The AI design was generated but could not be saved. Please try again.";
+    case "placement_unresolved":
+      return "A safe furniture layout could not be established. No new design was saved. Review room dimensions or furniture requirements before retrying.";
     default:
       return "AI generation failed. Please try again.";
   }

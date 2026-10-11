@@ -22,7 +22,7 @@ export type VisualizationBrief = {
   room: {
     shapeType: RoomGeometry["shapeType"];
     ceilingHeightCm: number | null;
-    polygon: Array<{ xCm: number; yCm: number }>;
+    polygon: Array<{ id?: string; xCm: number; yCm: number }>;
     walls: RoomGeometry["wallSegments"];
     openings: Array<{
       openingType: RoomOpening["openingType"];
@@ -77,7 +77,7 @@ export function buildVisualizationBrief(input: {
     room: {
       shapeType: input.geometry.shapeType,
       ceilingHeightCm: input.geometry.ceilingHeightCm,
-      polygon: input.geometry.vertices.map(({ xCm, yCm }) => ({ xCm, yCm })),
+      polygon: input.geometry.vertices.map(({ id, xCm, yCm }) => ({ id, xCm, yCm })),
       walls: input.geometry.wallSegments.map((wall) => ({ ...wall })),
       openings: input.openings.map((opening) => ({
         openingType: opening.openingType,

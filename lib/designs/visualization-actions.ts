@@ -29,7 +29,7 @@ const visualizationRequestSchema = z.object({
 
 type VisualizationResult =
   | { ok: true; visualizationId: string }
-  | { ok: false; error: "unauthorized" | "design_not_found" | "invalid_design" | "invalid_room_context" | "generation_failed" | "persistence_failed" };
+  | { ok: false; error: string };
 
 type DesignObject = Tables<"design_objects">;
 
@@ -48,6 +48,10 @@ export async function generateDesignVisualization(input: {
   const { data: claims, error: claimsError } = await supabase.auth.getClaims();
   const userId = claims?.claims?.sub;
   if (claimsError || !userId) return { ok: false, error: "unauthorized" };
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("RoomAI visualization configuration missing", JSON.stringify({ code: "not_configured" }));
+    return { ok: false, error: "not_configured" };
+  }
 
   const { projectId, designId } = parsedInput.data;
   const [projectResult, designResult, objectsResult, geometryResult] = await Promise.all([
@@ -132,7 +136,10 @@ export async function generateDesignVisualization(input: {
     })
     .select("id")
     .single();
-  if (attemptError || !visualization) return { ok: false, error: "persistence_failed" };
+  if (attemptError || !visualization) {
+    console.error("RoomAI visualization attempt failed", JSON.stringify({ stage: "create_attempt", code: attemptError?.code ?? "missing_attempt" }));
+    return { ok: false, error: "persistence_failed" };
+  }
 
   const storagePath = visualizationStoragePath({
     userId,
@@ -182,8 +189,8 @@ export async function generateDesignVisualization(input: {
   });
 
   if (workflow.ok) return { ok: true, visualizationId: visualization.id };
-  console.error("RoomAI visualization generation failed", { designId, errorCode: workflow.errorCode });
-  return { ok: false, error: workflow.errorCode === "generation_failed" ? "persistence_failed" : "generation_failed" };
+  console.error("RoomAI visualization generation failed", JSON.stringify({ designId, errorCode: workflow.errorCode }));
+  return { ok: false, error: workflow.errorCode };
 }
 
 export async function generateDesignVisualizationAction(formData: FormData): Promise<void> {
@@ -191,5 +198,5 @@ export async function generateDesignVisualizationAction(formData: FormData): Pro
   const designId = String(formData.get("designId") ?? "");
   const result = await generateDesignVisualization({ projectId, designId });
   if (result.ok) redirect(`/projects/${projectId}/designs/${designId}`);
-  redirect(`/projects/${projectId}/designs/${designId}?visualizationError=${result.error}`);
+  redirect(`/projects/${projectId}/designs/${designId}?visualizationError=${encodeURIComponent(result.error)}`);
 }

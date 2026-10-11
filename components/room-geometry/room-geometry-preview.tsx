@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import {
   GEOMETRY_EPSILON,
@@ -39,6 +39,7 @@ export function RoomGeometryPreview({
   openings = [],
   openingPlacementType,
   onSelectOpeningWall,
+  children,
 }: {
   geometry: RoomGeometry;
   thumbnail?: boolean;
@@ -49,6 +50,7 @@ export function RoomGeometryPreview({
   openings?: RoomOpening[];
   openingPlacementType?: "door" | "window" | null;
   onSelectOpeningWall?: (wallId: string) => void;
+  children?: ReactNode;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<{
@@ -173,6 +175,7 @@ export function RoomGeometryPreview({
       viewBox={`${view.minX} ${view.minY} ${view.width} ${view.height}`}
     >
       <polygon points={points} fill="#d9e7e2" stroke="none" pointerEvents="none" />
+      {children}
       {!thumbnail && displayGeometry.wallSegments.map((wall, index) => {
         const endpoints = getWallEndpoints(displayGeometry, wall);
         if (!endpoints) return null;

@@ -12,6 +12,8 @@ import { normalizeFurniturePlanForMarket } from "@/lib/furniture-planning/normal
 import { constrainFurniturePlanToRoom } from "@/lib/furniture-planning/room-constraints";
 import type { FurniturePlanV11 } from "@/lib/furniture-planning/types";
 import { createRectangleGeometry } from "@/lib/geometry/templates";
+import { correctGeneratedDesignPlacement } from "@/lib/designs/placement";
+import type { DesignSpecification } from "@/lib/designs/types";
 
 const geometry = createRectangleGeometry(500, 400, 250);
 const range = { widthMinCm: 80, widthMaxCm: 140, depthMinCm: 45, depthMaxCm: 80, heightMinCm: 35, heightMaxCm: 50 };
@@ -46,10 +48,11 @@ const candidate: CatalogCandidate = {
   vendorName: "Internal Vendor", productUrl: "https://example.com/product", primaryImageUrl: "https://example.com/image.jpg",
 };
 
-for (const scenario of ["eligible", "empty", "query_failure"] as const) {
+for (const scenario of ["eligible", "empty", "query_failure", "impossible"] as const) {
   test(`design action queries supported semantic types and preserves unmatched generation: ${scenario}`, async () => {
     const calls: string[] = [];
     const queries: CatalogQuery[] = [];
+    let persisted: DesignSpecification | undefined;
     let grounding: { plan: FurniturePlanV11; candidatePools: SemanticCatalogCandidatePool[] } | undefined;
     const fixtureRows: Record<string, object | null> = {
       projects: { id: "project-1", currency: "USD" }, room_preferences: null, room_geometries: {},
@@ -67,6 +70,7 @@ for (const scenario of ["eligible", "empty", "query_failure"] as const) {
     };
     const dependencies: Record<string, unknown> = {
       "@/lib/catalog/integration": integration,
+      "@/lib/designs/placement": { correctGeneratedDesignPlacement },
       "@/lib/catalog/query": { findCatalogProducts: async (query: CatalogQuery) => {
         calls.push("query"); queries.push(query);
         if (scenario === "query_failure") throw new Error("simulated read failure");
@@ -91,17 +95,30 @@ for (const scenario of ["eligible", "empty", "query_failure"] as const) {
         generateDesignSpecification: async (_brief: unknown, legacyCandidates: unknown[], received: typeof grounding) => {
           calls.push("generate"); grounding = received;
           assert.deepEqual(Array.from(legacyCandidates), []);
-          return { specification: { furniture: [] }, catalogSelectionsByObjectId: {} };
+          const generated: DesignSpecification = {
+            contractVersion: "1.0", designName: "Test", summary: "Test", room: { widthCm: 500, lengthCm: 400, heightCm: 250, roomType: "living_room" },
+            palette: { walls: "white", primary: "green", secondary: "black", accent: "red", metal: "brass" },
+            surfaces: { walls: "paint", floor: "wood", ceiling: "paint" }, lighting: { ambient: "light", task: "light", accent: "light" },
+            furniture: plan.items.map((item) => ({
+              objectId: item.id, category: item.category, name: item.id, description: "Test", material: "wood", color: "black",
+              dimensions: { widthCm: scenario === "impossible" ? 2000 : item.sizeRange.widthMinCm, depthCm: item.sizeRange.depthMinCm, heightCm: item.sizeRange.heightMinCm },
+              position: { xCm: -200, yCm: -200, zCm: 0 }, rotationDegrees: 0, required: true, estimatedPrice: 700, catalogSelectionKey: null, reasoning: "Test",
+            })), decorations: [], budget: { low: 0, high: 3000, currency: "USD" }, advice: [], warnings: [],
+          };
+          return { specification: generated, catalogSelectionsByObjectId: {} };
         },
       },
       "@/lib/designs/persistence": {
         DesignPersistenceError: class extends Error {},
-        persistDesign: async () => { calls.push("persist"); return { designId: "design-1", version: 1 }; },
+        persistDesign: async (_client: unknown, input: { specification: DesignSpecification }) => {
+          calls.push("persist"); persisted = input.specification;
+          return { designId: "design-1", version: 1 };
+        },
       },
     };
     const source = readFileSync(path.resolve("lib/designs/actions.ts"), "utf8");
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
-    const exports: { generateDesign?: (projectId: string) => Promise<{ success: boolean }> } = {};
+    const exports: { generateDesign?: (projectId: string) => Promise<{ success: boolean; error?: string; diagnostics?: unknown[] }> } = {};
     runInNewContext(compiled.outputText, {
       exports, Date, console: { error: () => undefined },
       require: (name: string) => {
@@ -111,7 +128,16 @@ for (const scenario of ["eligible", "empty", "query_failure"] as const) {
     });
     assert.ok(exports.generateDesign);
     const result = await exports.generateDesign("project-1");
+    if (scenario === "impossible") {
+      assert.equal(result.success, false);
+      assert.equal(result.error, "placement_unresolved");
+      assert.ok(result.diagnostics?.length);
+      assert.equal(calls.includes("persist"), false);
+      return;
+    }
     assert.equal(result.success, true);
+    assert.ok(persisted);
+    assert.ok(persisted.furniture.every((object) => object.position.xCm >= 0 && object.position.yCm >= 0));
     assert.deepEqual(calls, ["plan", "query", "query", "generate", "persist"]);
     assert.equal(queries.length, 2);
     assert.equal(queries[0].furnitureTypeCode, "coffee_table");

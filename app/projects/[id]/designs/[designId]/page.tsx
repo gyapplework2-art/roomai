@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
+import { DesignFloorPlan } from "@/components/design-floor-plan";
 import { VisualizationSubmitButton } from "@/components/visualization-submit-button";
 import type { RoomAIAlternative } from "@/lib/catalog/customer-alternative";
 import { buildAttributeAwareCustomerAlternativeMap } from "@/lib/catalog/customer-alternative-map";
@@ -13,6 +14,8 @@ import {
 } from "@/lib/catalog/query";
 import type { CatalogCandidate } from "@/lib/catalog/schema";
 import { calculateEstimatedDesignCost, designSpecificationSchema } from "@/lib/designs/schema";
+import { projectFloorPlanObjects } from "@/lib/designs/floor-plan";
+import { visualizationErrorMessage } from "@/lib/designs/visualization-workflow";
 import { replaceFurnitureAction } from "@/lib/designs/replacement-actions";
 import { generateDesignVisualizationAction } from "@/lib/designs/visualization-actions";
 import { validateRoomOpenings } from "@/lib/geometry/openings";
@@ -359,6 +362,11 @@ export default async function DesignPage({
     }
   }
   const estimatedCost = calculateEstimatedDesignCost(specification);
+  const floorPlanLabels = new Map(objects.flatMap((object) => {
+    const candidate = object.catalog_product_variant_id ? catalogByVariantId.get(object.catalog_product_variant_id) : undefined;
+    return candidate ? [[object.id, toRoomAIProduct(candidate).name] as const] : [];
+  }));
+  const floorPlan = projectFloorPlanObjects(objects, floorPlanLabels);
   const visualization = !visualizationResult.error ? visualizationResult.data : null;
   let visualizationUrl: string | null = null;
   if (visualization?.storage_bucket && visualization.storage_path) {
@@ -393,10 +401,18 @@ export default async function DesignPage({
         </div>
 
         <div className="mt-8 border border-slate-200 bg-white p-6 shadow-[0_12px_30px_rgba(15,23,42,0.04)] sm:p-10">
+          <Section title="Room plan">
+            {storedGeometry ? (
+              <DesignFloorPlan geometry={storedGeometry} openings={validOpenings ?? []} projection={floorPlan} />
+            ) : <p className="text-sm text-slate-500">Room geometry is unavailable.</p>}
+            {storedGeometry && (!validOpenings || openingsResult.error) && (
+              <p className="mt-4 text-sm text-amber-800">Door and window data is unavailable.</p>
+            )}
+          </Section>
           <Section title="Room visualization">
             {visualizationError && (
               <p className="mb-4 border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-                The visualization could not be generated. Your saved design is unchanged.
+                {visualizationErrorMessage(visualizationError)} Your saved design is unchanged.
               </p>
             )}
             {visualizationUrl ? (

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { VisualizationBrief } from "@/lib/designs/visualization-brief";
-import { runVisualizationWorkflow } from "@/lib/designs/visualization-workflow";
+import { runVisualizationWorkflow, visualizationErrorMessage } from "@/lib/designs/visualization-workflow";
 
 const brief: VisualizationBrief = {
   instruction: "VISUALIZE THE EXISTING DESIGN. DO NOT REDESIGN THE ROOM.",
@@ -24,6 +24,35 @@ const brief: VisualizationBrief = {
   furniture: [],
   decorations: [],
 };
+
+test("storage failures are persistence failures, not misreported provider errors", async () => {
+  for (const stage of ["upload", "complete"]) {
+    const result = await runVisualizationWorkflow(brief, {
+      generate: async () => Buffer.from("image"),
+      upload: async () => { if (stage === "upload") throw new Error("private storage details"); },
+      markGenerated: async () => { if (stage === "complete") throw new Error("private database details"); },
+      removeUpload: async () => undefined, markFailed: async () => undefined,
+      errorCode: () => "generation_failed",
+    });
+    assert.deepEqual(result, { ok: false, errorCode: "persistence_failed" });
+  }
+});
+
+test("configuration and provider codes survive failed-attempt handling and cleanup errors", async () => {
+  for (const code of ["not_configured", "provider_access_denied", "provider_rate_limited", "invalid_response"]) {
+    const result = await runVisualizationWorkflow(brief, {
+      generate: async () => { throw new Error("private provider payload"); },
+      upload: async () => assert.fail("No upload after provider failure"),
+      markGenerated: async () => assert.fail("No completion after provider failure"),
+      removeUpload: async () => assert.fail("No removal before upload"),
+      markFailed: async () => { throw new Error("failure recording unavailable"); }, errorCode: () => code,
+    });
+    assert.deepEqual(result, { ok: false, errorCode: code });
+    assert.ok(visualizationErrorMessage(code).length > 30);
+  }
+  assert.equal(visualizationErrorMessage("secret-token"), visualizationErrorMessage("constructor"));
+  assert.equal(visualizationErrorMessage("secret-token").includes("secret-token"), false);
+});
 
 test("completes a visualization using mocked provider and storage boundaries", async () => {
   const calls: string[] = [];
